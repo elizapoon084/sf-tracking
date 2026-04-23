@@ -1,0 +1,567 @@
+# -*- coding: utf-8 -*-
+# tracking_dashboard.py — 順豐寄件追蹤儀表板
+# 執行: python -m streamlit run scripts/tracking_dashboard.py --server.port 8502
+import os
+import sys
+import time
+import subprocess
+
+import base64
+import streamlit as st
+import pandas as pd
+import openpyxl
+
+# ── 雲端 / 本地 自動偵測 ───────────────────────────────────────────────────────
+# 喺 Streamlit Cloud 上，用相對路徑讀 Excel；本地用 config.py 的絕對路徑
+_IS_CLOUD = os.environ.get("STREAMLIT_SHARING_MODE") or not os.path.exists(
+    r"C:\Users\user\Desktop\順丰E順递"
+)
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+try:
+    from config import (
+        EXCEL_PATH as _LOCAL_EXCEL_PATH, EXCEL_SHEET,
+        COL_DATE, COL_NAME, COL_WAYBILL,
+        COL_RECIPIENT, COL_PHONE, COL_ADDRESS,
+        COL_ITEMS, COL_QTY,
+        COL_STATUS, COL_STATUS_TIME,
+        COL_FREIGHT, COL_NOTES, COL_TAX,
+        COL_PDF_PATH,
+        ANOMALY_KEYWORDS,
+    )
+except Exception:
+    # 雲端環境沒有 config.py，使用預設值
+    _LOCAL_EXCEL_PATH = ""
+    EXCEL_SHEET   = "追蹤表"
+    COL_DATE=1; COL_NAME=2; COL_WAYBILL=4; COL_RECIPIENT=5; COL_PHONE=6
+    COL_ADDRESS=7; COL_ITEMS=8; COL_QTY=9; COL_STATUS=13; COL_STATUS_TIME=14
+    COL_FREIGHT=12; COL_NOTES=17; COL_TAX=18; COL_PDF_PATH=16
+    ANOMALY_KEYWORDS = ["退回","異常","卡關","攔截","問題件"]
+
+# 雲端用相對路徑，本地用 config.py 的絕對路徑
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_CLOUD_EXCEL = os.path.join(_SCRIPT_DIR, "..", "data", "tracking.xlsx")
+EXCEL_PATH = _CLOUD_EXCEL if _IS_CLOUD else _LOCAL_EXCEL_PATH
+
+SF_PUBLIC_TRACK = "https://www.sf-express.com/cn/sc/dynamic_function/waybill/#search/bill-number/{}"
+
+
+# ── 稅金寫回 Excel ─────────────────────────────────────────────────────────────
+
+def _save_tax_values(changed_df: pd.DataFrame) -> int:
+    """Write updated tax values back to tracking.xlsx. Returns count saved."""
+    try:
+        wb = openpyxl.load_workbook(EXCEL_PATH)
+        ws = wb[EXCEL_SHEET]
+        saved = 0
+        for _, row in changed_df.iterrows():
+            waybill = str(row.get("運單號", "")).strip()
+            tax     = row.get("稅金(HKD)", None)
+            if not waybill or waybill in ("None", "nan", ""):
+                continue
+            for excel_row in ws.iter_rows(min_row=2):
+                wb_cell = excel_row[COL_WAYBILL - 1]
+                if str(wb_cell.value or "").strip() == waybill:
+                    excel_row[COL_TAX - 1].value = float(tax) if tax not in (None, "", "nan") else None
+                    saved += 1
+                    break
+        wb.save(EXCEL_PATH)
+        return saved
+    except Exception as e:
+        st.error(f"儲存稅金失敗：{e}")
+        return 0
+
+
+# ── Status badge colours ───────────────────────────────────────────────────────
+_STATUS_COLOR = {
+    "已簽收":   ("#27ae60", "✅"),
+    "派送中":   ("#2980b9", "🚚"),
+    "待派送":   ("#8e44ad", "📬"),
+    "待簽收":   ("#8e44ad", "📬"),
+    "運送中":   ("#2980b9", "🚚"),
+    "攬收成功": ("#16a085", "📦"),
+    "攬收":     ("#16a085", "📦"),
+    "已發出":   ("#16a085", "📤"),
+    "待寄出":   ("#95a5a6", "⏳"),
+    "已取消":   ("#bdc3c7", "❌"),
+    "退回":     ("#e74c3c", "↩️"),
+    "異常":     ("#e74c3c", "⚠️"),
+    "卡關":     ("#e74c3c", "🚫"),
+    "攔截":     ("#e74c3c", "🚫"),
+    "問題件":   ("#e74c3c", "⚠️"),
+    "更新失敗": ("#e67e22", "❓"),
+    "查詢不到": ("#e67e22", "❓"),
+    "狀態不明": ("#e67e22", "❓"),
+}
+
+def _badge(status: str) -> str:
+    s = str(status)
+    color, icon = "#95a5a6", ""
+    for kw, (c, i) in _STATUS_COLOR.items():
+        if kw in s:
+            color, icon = c, i
+            break
+    return (
+        f'<span style="background:{color};color:#fff;padding:3px 10px;'
+        f'border-radius:12px;font-size:12px;font-weight:600;white-space:nowrap;">'
+        f'{icon} {s}</span>'
+    )
+
+def _val(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v != v:   # NaN check (NaN != NaN)
+        return ""
+    s = str(v).strip()
+    return "" if s.lower() in ("nan", "none") else s
+
+def _esc(s) -> str:
+    v = _val(s)
+    return v.replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+
+_HK_KW  = ["香港", "九龍", "新界", "kowloon", "hong kong", "東區", "中區",
+            "灣仔", "油麻地", "旺角", "屯門", "沙田", "大埔", "將軍澳",
+            "柴灣", "觀塘", "荃灣", "元朗", "上水", "粉嶺", "葵涌"]
+_CN_KW  = ["廣東", "深圳", "廣州", "北京", "上海", "福建", "浙江", "江蘇",
+            "湖南", "四川", "重慶", "天津", "成都", "杭州", "南京", "武漢",
+            "東莞", "中山", "佛山", "珠海", "惠州", "廈門"]
+
+def _dest(addr: str) -> str:
+    a = addr.lower()
+    for kw in _HK_KW:
+        if kw.lower() in a:
+            return "🇭🇰 香港"
+    for kw in _CN_KW:
+        if kw.lower() in a:
+            return "🇨🇳 中國"
+    return ""
+
+
+# ── Data loading ──────────────────────────────────────────────────────────────
+
+@st.cache_data(ttl=30)
+def load_orders() -> pd.DataFrame:
+    if not os.path.exists(EXCEL_PATH):
+        return pd.DataFrame()
+    try:
+        wb = openpyxl.load_workbook(EXCEL_PATH, read_only=True, data_only=True)
+        ws = wb[EXCEL_SHEET]
+        rows = list(ws.iter_rows(values_only=True))
+        wb.close()
+        if len(rows) < 2:
+            return pd.DataFrame()
+        headers = list(rows[0])
+        data = [list(r) for r in rows[1:] if any(v is not None for v in r)]
+        return pd.DataFrame(data, columns=headers)
+    except Exception as e:
+        st.error(f"讀取 Excel 失敗：{e}")
+        return pd.DataFrame()
+
+
+# ── Status refresh ────────────────────────────────────────────────────────────
+
+def _run_status_update() -> str:
+    cli = os.path.join(os.path.dirname(os.path.abspath(__file__)), "update_status_cli.py")
+    result = subprocess.run(
+        [sys.executable, cli],
+        capture_output=True, text=True, encoding="utf-8", timeout=300,
+    )
+    return (result.stdout or "") + (result.stderr or "")
+
+
+# ── Main layout ───────────────────────────────────────────────────────────────
+
+def main():
+    st.set_page_config(page_title="順豐寄件追蹤", page_icon="📦",
+                       layout="wide", initial_sidebar_state="expanded")
+
+    st.markdown("""
+    <style>
+    .block-container { padding-top: 1.2rem; padding-bottom: 1rem; }
+    div[data-testid="metric-container"] {
+        background: #f8f9fa; border-radius: 10px;
+        padding: 12px 16px; border: 1px solid #e9ecef;
+    }
+    thead tr th { position: sticky; top: 0; z-index: 1; }
+    </style>
+    """, unsafe_allow_html=True)
+
+    # ── Sidebar ───────────────────────────────────────────────────────────────
+    with st.sidebar:
+        st.markdown("## 📦 順豐追蹤")
+        if _IS_CLOUD:
+            st.info("☁️ 雲端唯讀模式\n\n資料由本地電腦定時同步，查件請點擊運單號。")
+        st.divider()
+
+        if not _IS_CLOUD:
+            if st.button("🔄 向順豐查詢最新狀態", use_container_width=True, type="primary"):
+                with st.spinner("正在查詢順豐，請稍候（1-2 分鐘）…"):
+                    out = _run_status_update()
+                st.success("✅ 狀態更新完成")
+                if out:
+                    with st.expander("查看輸出記錄"):
+                        st.code(out)
+                st.cache_data.clear()
+                st.rerun()
+
+        st.divider()
+        st.markdown("#### 🔍 篩選")
+        status_options = [
+            "全部", "待寄出", "攬收成功", "運送中",
+            "待派送", "待簽收", "派送中", "已簽收", "退回", "異常", "問題件",
+        ]
+        sel_status = st.selectbox("狀態篩選", status_options, label_visibility="collapsed")
+        dest_options = ["全部目的地", "🇭🇰 香港", "🇨🇳 中國"]
+        sel_dest   = st.selectbox("目的地", dest_options, label_visibility="collapsed")
+        search_kw  = st.text_input("🔎 搜尋客人名 / 運單號 / 地址")
+
+        st.divider()
+        st.caption("💡 點擊運單號可在順豐網站查件")
+        st.caption("💡 「全部（顯示活躍）」隱藏已取消訂單")
+
+    # ── Load data ─────────────────────────────────────────────────────────────
+    df = load_orders()
+    if df.empty:
+        st.info("📭 暫無訂單記錄。")
+        st.caption(f"Excel 路徑：{EXCEL_PATH}")
+        return
+
+    # 最新排最頂
+    df = df.iloc[::-1].reset_index(drop=True)
+
+    status_col    = df.columns[COL_STATUS     - 1]
+    waybill_col   = df.columns[COL_WAYBILL    - 1]
+    date_col      = df.columns[COL_DATE       - 1]
+    name_col      = df.columns[COL_NAME       - 1]
+    items_col     = df.columns[COL_ITEMS      - 1]
+    qty_col       = df.columns[COL_QTY        - 1]
+    addr_col      = df.columns[COL_ADDRESS    - 1]
+    recipient_col = df.columns[COL_RECIPIENT  - 1]
+    stime_col     = df.columns[COL_STATUS_TIME- 1]
+    freight_col   = df.columns[COL_FREIGHT    - 1]
+    notes_col     = df.columns[COL_NOTES      - 1]
+    # COL_TAX may not exist yet in older Excel files — guard with index check
+    tax_col       = df.columns[COL_TAX - 1] if len(df.columns) >= COL_TAX else None
+
+    s = df[status_col].astype(str)
+    total     = len(df)
+    delivered = int(s.str.contains("已簽收").sum())
+    in_flight = int(s.str.contains("派送中|運送中|攬收|待派送|待簽收").sum())
+    pending   = int(s.str.contains("待寄出").sum())
+    cancelled = int(s.str.contains("已取消").sum())
+    anomaly   = int(s.str.contains("|".join(ANOMALY_KEYWORDS)).sum())
+
+    # ── Summary stats ─────────────────────────────────────────────────────────
+    st.markdown("### 📊 概況")
+    c1, c2, c3, c4, c5, c6 = st.columns(6)
+    c1.metric("📦 總訂單",  total)
+    c2.metric("✅ 已簽收",  delivered)
+    c3.metric("🚚 運送中",  in_flight)
+    c4.metric("⏳ 待寄出",  pending)
+    c5.metric("❌ 已取消",  cancelled)
+    c6.metric("⚠️ 異常",    anomaly,
+              delta="需跟進" if anomaly else "正常",
+              delta_color="inverse")
+
+    st.divider()
+
+    # ── Apply filters ─────────────────────────────────────────────────────────
+    # Always remove 已取消 — cancelled orders never shown in table
+    display = df[~df[status_col].astype(str).str.contains("已取消", na=False)].copy()
+
+    if sel_status not in ("全部（顯示活躍）", "全部"):
+        display = display[display[status_col].astype(str).str.contains(sel_status, na=False)]
+
+    if sel_dest != "全部目的地":
+        dest_key = "香港" if "香港" in sel_dest else "中國"
+        display = display[display[addr_col].apply(
+            lambda v: dest_key in _dest(_val(v)))]
+
+    if search_kw:
+        kw = search_kw.lower()
+        display = display[display.apply(
+            lambda r: kw in " ".join(_val(v) for v in r).lower(), axis=1)]
+
+    st.caption(f"顯示 **{len(display)}** / {total} 條記錄")
+
+    # ── Order table ───────────────────────────────────────────────────────────
+    rows_html = []
+    for i, (_, row) in enumerate(display.iterrows()):
+        wb_val      = _val(row[waybill_col])
+        status      = _val(row[status_col]) or "—"
+        name_v      = _val(row[name_col])
+        date_v      = _val(row[date_col])
+        items_v     = _val(row[items_col])
+        qty_v       = _val(row[qty_col])
+        addr_v      = _val(row[addr_col])
+        recipient_v = _val(row[recipient_col])
+        stime_v     = _val(row[stime_col])
+        freight_v   = _val(row[freight_col])
+        notes_v     = _val(row[notes_col])
+        tax_v       = _val(row[tax_col]) if tax_col is not None else ""
+
+        is_anom     = any(kw in status for kw in ANOMALY_KEYWORDS)
+        is_cancel   = "已取消" in status
+        is_signed   = "已簽收" in status
+
+        if is_anom:
+            row_bg = "background:#fff5f5;"
+        elif is_cancel:
+            row_bg = "background:#fafafa;opacity:0.75;"
+        elif i % 2 == 0:
+            row_bg = "background:#ffffff;"
+        else:
+            row_bg = "background:#f8fafc;"
+
+        # ── 運單號 cell ───────────────────────────────────────────────────────
+        wb_cell = (
+            f'<a href="{SF_PUBLIC_TRACK.format(wb_val)}" target="_blank" '
+            f'style="color:#2980b9;font-family:monospace;font-size:12px;'
+            f'text-decoration:none;font-weight:600;">{wb_val}</a>'
+            if wb_val else '<span style="color:#ccc">—</span>'
+        )
+
+        # ── 貨品 cell ─────────────────────────────────────────────────────────
+        items_cell = (
+            f'<span title="{_esc(items_v)}" style="cursor:help;">'
+            f'{_esc(items_v[:40])}{"…" if len(items_v) > 40 else ""}</span>'
+            if items_v else '<span style="color:#bbb;font-size:11px;">—</span>'
+        )
+
+        # ── 地址 cell ─────────────────────────────────────────────────────────
+        dest_tag = _dest(addr_v)
+        dest_html = (
+            f'<span style="font-size:10px;background:#ecf0f1;border-radius:4px;'
+            f'padding:1px 5px;margin-right:4px;">{dest_tag}</span>'
+            if dest_tag else ""
+        )
+        addr_cell = (
+            f'{dest_html}<span title="{_esc(addr_v)}" style="cursor:help;font-size:12px;color:#555;">'
+            f'{_esc(addr_v[:28])}{"…" if len(addr_v) > 28 else ""}</span>'
+            if addr_v else '<span style="color:#bbb;font-size:11px;">—</span>'
+        )
+
+        # ── 客人名 cell (tooltip shows notes) ────────────────────────────────
+        name_html = (
+            f'<span title="{_esc(notes_v)}" style="cursor:help;font-weight:700;">{_esc(name_v)}</span>'
+            if notes_v and name_v else
+            f'<b>{_esc(name_v)}</b>' if name_v else
+            '<span style="color:#bbb;font-size:11px;">—</span>'
+        )
+
+        # ── 狀態 cell — badge + 簽收時間 for signed items ────────────────────
+        if is_signed and stime_v:
+            status_cell = (
+                f'{_badge(status)}<br>'
+                f'<span style="font-size:10px;color:#27ae60;white-space:nowrap;">'
+                f'🕐 {_esc(stime_v[:16])}</span>'
+            )
+        else:
+            status_cell = _badge(status)
+
+        # ── 電子存根 cell ─────────────────────────────────────────────────────
+        if is_signed:
+            if freight_v or recipient_v:
+                receipt_lines = []
+                if recipient_v:
+                    receipt_lines.append(
+                        f'<b style="color:#2c3e50;">收：</b>{_esc(recipient_v)}'
+                    )
+                # 費用合計
+                if freight_v:
+                    receipt_lines.append(
+                        f'<b>費用合計：</b>'
+                        f'<span style="color:#27ae60;font-weight:700;">HKD {_esc(freight_v)}</span>'
+                    )
+                # 產品類型、件數 from notes
+                if notes_v:
+                    for part in notes_v.split("|"):
+                        part = part.strip()
+                        if part.startswith("類型"):
+                            receipt_lines.append(
+                                f'<b>產品類型：</b>'
+                                f'<span style="color:#8e44ad;">{_esc(part.replace("類型:","").strip())}</span>'
+                            )
+                # 件數
+                if qty_v:
+                    receipt_lines.append(f'<b>件數：</b>{_esc(qty_v)}')
+                # 收件時間
+                if stime_v:
+                    receipt_lines.append(
+                        f'<b>收件時間：</b>'
+                        f'<span style="color:#2980b9;font-size:11px;">{_esc(stime_v[:19])}</span>'
+                    )
+                receipt_cell = "<br>".join(receipt_lines)
+            else:
+                receipt_cell = (
+                    '<span style="color:#e67e22;font-size:11px;">⏳ 待取存根<br>'
+                    '（下次更新時自動抓取）</span>'
+                )
+        else:
+            receipt_cell = '<span style="color:#ddd;font-size:11px;">—</span>'
+
+        tax_html = (
+            f'<span style="color:#e67e22;font-weight:600;">HKD {_esc(tax_v)}</span>'
+            if tax_v else
+            '<span style="color:#ddd;font-size:11px;">—</span>'
+        )
+
+        rows_html.append(f"""
+        <tr style="{row_bg}border-bottom:1px solid #e9ecef;">
+          <td style="padding:8px 10px;white-space:nowrap;font-size:12px;color:#666;">{_esc(date_v)}</td>
+          <td style="padding:8px 10px;font-size:14px;">{name_html}</td>
+          <td style="padding:8px 10px;">{wb_cell}</td>
+          <td style="padding:8px 10px;">{items_cell}</td>
+          <td style="padding:8px 10px;text-align:center;font-size:13px;">{_esc(qty_v)}</td>
+          <td style="padding:8px 10px;">{addr_cell}</td>
+          <td style="padding:8px 10px;text-align:center;">{status_cell}</td>
+          <td style="padding:8px 10px;font-size:12px;line-height:1.6;">{receipt_cell}</td>
+          <td style="padding:8px 10px;text-align:right;">{tax_html}</td>
+        </tr>""")
+
+    table_html = f"""
+    <div style="overflow-x:auto;border-radius:10px;border:1px solid #e9ecef;
+                box-shadow:0 1px 4px rgba(0,0,0,.06);">
+    <table style="width:100%;border-collapse:collapse;font-size:13px;font-family:sans-serif;">
+    <thead>
+    <tr style="background:#34495e;color:#fff;font-size:12px;letter-spacing:.5px;">
+      <th style="padding:10px 10px;text-align:left;font-weight:600;">寄出時間</th>
+      <th style="padding:10px 10px;text-align:left;font-weight:600;">客人</th>
+      <th style="padding:10px 10px;text-align:left;font-weight:600;">運單號</th>
+      <th style="padding:10px 10px;text-align:left;font-weight:600;">貨品</th>
+      <th style="padding:10px 10px;text-align:center;font-weight:600;">件</th>
+      <th style="padding:10px 10px;text-align:left;font-weight:600;">收件地址</th>
+      <th style="padding:10px 10px;text-align:center;font-weight:600;">狀態</th>
+      <th style="padding:10px 10px;text-align:left;font-weight:600;">電子存根</th>
+      <th style="padding:10px 10px;text-align:right;font-weight:600;">稅金</th>
+    </tr>
+    </thead>
+    <tbody>{''.join(rows_html)}</tbody>
+    </table></div>"""
+
+    st.markdown(table_html, unsafe_allow_html=True)
+
+    # ── Active tracking links ─────────────────────────────────────────────────
+    active = [
+        (str(row[name_col]), str(row[waybill_col]))
+        for _, row in df.iterrows()
+        if row[waybill_col]
+        and str(row[waybill_col]) not in ("None", "")
+        and str(row[status_col]) not in ("None", "")
+        and "已簽收" not in str(row[status_col])
+        and "已取消" not in str(row[status_col])
+    ]
+
+    if active:
+        st.divider()
+        st.markdown("### 🔗 在途快件 — 快速查詢")
+        cols = st.columns(min(len(active), 4))
+        for i, (name, wb) in enumerate(active[:12]):
+            with cols[i % 4]:
+                status_now = str(df.loc[df[waybill_col].astype(str) == wb, status_col].values[0] if len(df.loc[df[waybill_col].astype(str) == wb]) else "")
+                badge_color = "#2980b9"
+                for kw, (c, _) in _STATUS_COLOR.items():
+                    if kw in status_now:
+                        badge_color = c; break
+                st.markdown(
+                    f'<a href="{SF_PUBLIC_TRACK.format(wb)}" target="_blank" style="'
+                    f'display:block;background:{badge_color};color:#fff;'
+                    f'padding:10px 14px;border-radius:8px;text-decoration:none;'
+                    f'margin:4px 0;font-size:13px;line-height:1.5;">'
+                    f'<b>{name}</b><br>'
+                    f'<span style="font-family:monospace;font-size:11px;opacity:.9">{wb}</span><br>'
+                    f'<span style="font-size:11px;opacity:.85">{status_now}</span></a>',
+                    unsafe_allow_html=True)
+
+    # ── 小票 PDF 預覽 ─────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### 🧾 小票預覽")
+
+    pdf_col  = df.columns[COL_PDF_PATH - 1]
+    has_pdf  = df[pdf_col].apply(lambda v: bool(_val(v)) and os.path.exists(_val(v)))
+    pdf_rows = df[has_pdf]
+
+    if pdf_rows.empty:
+        st.info("暫無小票檔案（完成寄件後自動出現）")
+    else:
+        options = [
+            f"{_val(r[date_col])}  {_val(r[name_col])}  {_val(r[waybill_col])}"
+            for _, r in pdf_rows.iterrows()
+        ]
+        selected = st.selectbox("選擇訂單", options[::-1])   # 最新在最頂
+        if selected:
+            sel_row  = pdf_rows.iloc[len(options) - 1 - options[::-1].index(selected)]
+            pdf_path = _val(sel_row[pdf_col])
+            if os.path.exists(pdf_path):
+                with open(pdf_path, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                st.markdown(
+                    f'<iframe src="data:application/pdf;base64,{b64}" '
+                    f'width="100%" height="700" type="application/pdf">'
+                    f'</iframe>',
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.warning(f"找不到檔案：{pdf_path}")
+
+    # ── 稅金輸入（本地專用）─────────────────────────────────────────────────────
+    if not _IS_CLOUD:
+        st.divider()
+        st.markdown("### 💰 稅金輸入")
+        st.caption("直接喺稅金欄輸入金額，修改後自動儲存到 Excel")
+
+        tax_data = []
+        for _, r in df.iterrows():
+            wb_v     = _val(r[waybill_col])
+            date_v   = _val(r[date_col])
+            name_v   = _val(r[name_col])
+            status_v = _val(r[status_col])
+            tax_v    = r[tax_col] if tax_col and tax_col in df.columns else None
+            try:
+                tax_num = float(tax_v) if tax_v not in (None, "", "nan", "None") else None
+            except (ValueError, TypeError):
+                tax_num = None
+            tax_data.append({
+                "日期":      date_v,
+                "客人":      name_v,
+                "運單號":    wb_v,
+                "狀態":      status_v,
+                "稅金(HKD)": tax_num,
+            })
+
+        tax_df = pd.DataFrame(tax_data)
+        edited = st.data_editor(
+            tax_df,
+            column_config={
+                "日期":      st.column_config.TextColumn("日期",   disabled=True, width="small"),
+                "客人":      st.column_config.TextColumn("客人",   disabled=True, width="small"),
+                "運單號":    st.column_config.TextColumn("運單號", disabled=True, width="medium"),
+                "狀態":      st.column_config.TextColumn("狀態",   disabled=True, width="small"),
+                "稅金(HKD)": st.column_config.NumberColumn(
+                    "稅金 (HKD)", min_value=0, step=0.1, format="%.1f", width="small",
+                ),
+            },
+            hide_index=True,
+            use_container_width=True,
+            key="tax_editor",
+        )
+        orig_tax = tax_df["稅金(HKD)"].fillna(-1)
+        edit_tax = edited["稅金(HKD)"].fillna(-1)
+        if (orig_tax != edit_tax).any():
+            saved = _save_tax_values(edited[orig_tax != edit_tax])
+            if saved:
+                st.success(f"✅ 已儲存 {saved} 筆稅金記錄")
+                st.cache_data.clear()
+                st.rerun()
+
+    # ── Auto-refresh ──────────────────────────────────────────────────────────
+    st.divider()
+    with st.expander("⚙️ 自動更新設定"):
+        if st.checkbox("每 60 秒自動重新載入頁面資料（不查詢順豐，只重讀 Excel）"):
+            time.sleep(60)
+            st.cache_data.clear()
+            st.rerun()
+
+
+if __name__ == "__main__":
+    main()

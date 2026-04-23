@@ -1,0 +1,15 @@
+# 本地大檔案 / 敏感資料
+Images/
+logs/
+data/products.json
+__pycache__/
+*.pyc
+*.pyo
+.env
+
+# Chrome Profile（本地自動化專用）
+C:\ChromeAutomation
+
+# Windows
+Thumbs.db
+desktop.ini
