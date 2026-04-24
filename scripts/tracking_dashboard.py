@@ -7,6 +7,9 @@ import time
 import subprocess
 
 import base64
+import io
+from collections import defaultdict
+from datetime import date as _date
 import streamlit as st
 import pandas as pd
 import openpyxl
@@ -240,6 +243,7 @@ def main():
     stime_col     = df.columns[COL_STATUS_TIME- 1]
     freight_col   = df.columns[COL_FREIGHT    - 1]
     notes_col     = df.columns[COL_NOTES      - 1]
+    phone_col     = df.columns[COL_PHONE      - 1]
     # COL_TAX may not exist yet in older Excel files — guard with index check
     tax_col       = df.columns[COL_TAX - 1] if len(df.columns) >= COL_TAX else None
 
@@ -440,6 +444,125 @@ def main():
     </table></div>"""
 
     st.markdown(table_html, unsafe_allow_html=True)
+
+    # ── 訂單貨品詳情 ──────────────────────────────────────────────────────────
+    st.divider()
+    with st.expander("📋 點開查看訂單貨品詳情", expanded=False):
+        order_keys = [
+            f"{_val(r[date_col])}  {_val(r[name_col])}  {_val(r[waybill_col])}"
+            for _, r in df.iterrows() if _val(r[waybill_col])
+        ]
+        if order_keys:
+            pick = st.selectbox("選擇訂單", ["— 請選擇 —"] + order_keys, key="detail_pick")
+            if pick != "— 請選擇 —":
+                matched = df[df.apply(
+                    lambda r: f"{_val(r[date_col])}  {_val(r[name_col])}  {_val(r[waybill_col])}" == pick,
+                    axis=1)]
+                if not matched.empty:
+                    r = matched.iloc[0]
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.markdown(f"**客人：** {_val(r[name_col])}")
+                        st.markdown(f"**運單號：** `{_val(r[waybill_col])}`")
+                        st.markdown(f"**日期：** {_val(r[date_col])}")
+                        st.markdown(f"**狀態：** {_val(r[status_col])}")
+                    with c2:
+                        st.markdown(f"**電話：** {_val(r[phone_col])}")
+                        st.markdown(f"**地址：** {_val(r[addr_col])}")
+                    st.markdown("**貨品清單：**")
+                    for item in _val(r[items_col]).split(" / "):
+                        item = item.strip()
+                        if item:
+                            if "×" in item:
+                                parts = item.rsplit("×", 1)
+                                st.markdown(
+                                    f"　• **{parts[0].strip()}** &nbsp;×&nbsp; "
+                                    f"<span style='color:#e74c3c;font-weight:700;'>{parts[1].strip()} 件</span>",
+                                    unsafe_allow_html=True)
+                            else:
+                                st.markdown(f"　• {item}")
+
+    # ── 批次發貨清單 ──────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### 📦 批次發貨清單")
+    st.caption("選擇已簽收訂單，一鍵生成合併貨品清單並下載")
+
+    signed_mask = df[status_col].astype(str).str.contains("已簽收", na=False)
+    signed_df   = df[signed_mask].copy()
+
+    if signed_df.empty:
+        st.info("暫無已簽收訂單")
+    else:
+        customers = ["全部客人"] + sorted(
+            [x for x in signed_df[name_col].dropna().unique() if x])
+        sel_cust = st.selectbox("篩選客人", customers, key="batch_cust")
+
+        batch_pool = signed_df if sel_cust == "全部客人" else \
+            signed_df[signed_df[name_col].astype(str) == sel_cust]
+
+        order_labels = [
+            f"{_val(r[date_col])}  {_val(r[name_col])}  {_val(r[waybill_col])}"
+            for _, r in batch_pool.iterrows()
+        ]
+
+        if order_labels:
+            sel_orders = st.multiselect(
+                f"勾選訂單（共 {len(order_labels)} 張已簽收）",
+                order_labels, default=order_labels, key="batch_sel")
+
+            if sel_orders and st.button("📊 生成合併發貨清單", type="primary"):
+                totals = defaultdict(int)
+                included_rows = []
+                for label in sel_orders:
+                    for _, row in batch_pool.iterrows():
+                        if f"{_val(row[date_col])}  {_val(row[name_col])}  {_val(row[waybill_col])}" == label:
+                            included_rows.append(row)
+                            for item in _val(row[items_col]).split(" / "):
+                                item = item.strip()
+                                if "×" in item:
+                                    nm, q = item.rsplit("×", 1)
+                                    try:
+                                        totals[nm.strip()] += int(q.strip())
+                                    except ValueError:
+                                        totals[nm.strip()] += 1
+                            break
+
+                if totals:
+                    total_kinds = len(totals)
+                    total_qty   = sum(totals.values())
+                    st.markdown(f"#### ✅ 合併結果：{total_kinds} 種貨品，共 {total_qty} 件")
+
+                    result_rows = sorted(totals.items(), key=lambda x: x[0])
+                    st.dataframe(
+                        pd.DataFrame(result_rows, columns=["貨品名稱", "總數量"]),
+                        use_container_width=True, hide_index=True)
+
+                    # ── 生成 Excel 下載 ──────────────────────────────────────
+                    buf = io.BytesIO()
+                    wb_out = openpyxl.Workbook()
+                    ws_out = wb_out.active
+                    ws_out.title = "發貨清單"
+                    ws_out.append(["貨品名稱", "總數量"])
+                    for nm, qty in result_rows:
+                        ws_out.append([nm, qty])
+                    ws_out.append([])
+                    ws_out.append([f"共 {total_kinds} 種", f"合計 {total_qty} 件"])
+                    ws_out.append([])
+                    ws_out.append(["訂單明細"])
+                    ws_out.append(["日期", "客人", "運單號", "貨品"])
+                    for row in included_rows:
+                        ws_out.append([
+                            _val(row[date_col]), _val(row[name_col]),
+                            _val(row[waybill_col]), _val(row[items_col]),
+                        ])
+                    wb_out.save(buf)
+                    buf.seek(0)
+
+                    fname = f"發貨清單_{sel_cust}_{_date.today().strftime('%Y%m%d')}.xlsx"
+                    st.download_button(
+                        "📥 下載 Excel 發貨清單",
+                        data=buf, file_name=fname,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
     # ── Active tracking links ─────────────────────────────────────────────────
     active = [
