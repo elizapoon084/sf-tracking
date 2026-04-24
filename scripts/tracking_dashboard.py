@@ -290,6 +290,7 @@ def main():
 
     # ── Order table ───────────────────────────────────────────────────────────
     rows_html = []
+    logistics_keys = []   # 用於製作物流單的選單
     for i, (_, row) in enumerate(display.iterrows()):
         wb_val      = _val(row[waybill_col])
         status      = _val(row[status_col]) or "—"
@@ -423,8 +424,12 @@ def main():
             '<span style="color:#ddd;font-size:11px;">—</span>'
         )
 
+        lkey = f"#{i+1}  {_val(row[date_col])}  {_val(row[name_col])}  {_val(row[waybill_col])}"
+        logistics_keys.append((lkey, row))
+
         rows_html.append(f"""
         <tr style="{row_bg}border-bottom:1px solid #e9ecef;">
+          <td style="padding:8px 6px;text-align:center;color:#aaa;font-size:11px;white-space:nowrap;">#{i+1}</td>
           <td style="padding:8px 10px;white-space:nowrap;font-size:12px;color:#666;">{_esc(date_v)}</td>
           <td style="padding:8px 10px;font-size:14px;min-width:110px;">{name_html}</td>
           <td style="padding:8px 10px;">{wb_cell}</td>
@@ -442,6 +447,7 @@ def main():
     <table style="width:100%;border-collapse:collapse;font-size:13px;font-family:sans-serif;">
     <thead>
     <tr style="background:#34495e;color:#fff;font-size:12px;letter-spacing:.5px;">
+      <th style="padding:10px 6px;text-align:center;font-weight:600;color:#aaa;">#</th>
       <th style="padding:10px 10px;text-align:left;font-weight:600;">寄出時間</th>
       <th style="padding:10px 10px;text-align:left;font-weight:600;min-width:110px;">客人</th>
       <th style="padding:10px 10px;text-align:left;font-weight:600;">運單號</th>
@@ -576,6 +582,81 @@ def main():
                         "📥 下載 Excel 發貨清單",
                         data=buf, file_name=fname,
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    # ── 製作物流單 ────────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### 🚚 製作物流單")
+    st.caption("按表格左側 # 號找到訂單，選擇貨品後匯出")
+
+    if logistics_keys:
+        lkey_labels = [k for k, _ in logistics_keys]
+        sel_lkey = st.selectbox("選擇訂單", ["— 請選擇 —"] + lkey_labels, key="logistics_sel")
+
+        if sel_lkey != "— 請選擇 —":
+            sel_row = next(r for k, r in logistics_keys if k == sel_lkey)
+            recip_v = _val(sel_row[recipient_col])
+            ph_v    = _val(sel_row[phone_col])
+            addr_v2 = _val(sel_row[addr_col])
+            items_s = _val(sel_row[items_col])
+
+            st.markdown(
+                f"**收件人：** {recip_v} &nbsp;｜&nbsp; **電話：** {ph_v} &nbsp;｜&nbsp; **地址：** {addr_v2}")
+
+            st.markdown("**選擇貨品及數量：**")
+            parsed = []
+            for it in items_s.split(" / "):
+                it = it.strip()
+                if not it:
+                    continue
+                if "×" in it:
+                    nm, q = it.rsplit("×", 1)
+                    try:
+                        orig = int(q.strip())
+                    except ValueError:
+                        orig = 1
+                    parsed.append((nm.strip(), orig))
+                else:
+                    parsed.append((it, 1))
+
+            selected_items = []
+            for idx2, (nm, orig) in enumerate(parsed):
+                c1, c2, c3 = st.columns([0.04, 0.62, 0.34])
+                with c1:
+                    chk = st.checkbox("", value=True, key=f"lchk_{sel_lkey}_{idx2}")
+                with c2:
+                    st.markdown(f"**{nm}**")
+                with c3:
+                    qty2 = st.number_input(
+                        "數量", min_value=0, max_value=orig * 5,
+                        value=orig, step=1,
+                        key=f"lqty_{sel_lkey}_{idx2}",
+                        label_visibility="collapsed")
+                if chk and qty2 > 0:
+                    selected_items.append({"name": nm, "qty": qty2})
+
+            if selected_items:
+                if st.button("📥 匯出物流單 Excel", type="primary", key="logistics_export"):
+                    buf2 = io.BytesIO()
+                    wb2  = openpyxl.Workbook()
+                    ws2  = wb2.active
+                    ws2.title = "物流單"
+                    ws2.append(["收件人", recip_v])
+                    ws2.append(["電話",   ph_v])
+                    ws2.append(["地址",   addr_v2])
+                    ws2.append([])
+                    ws2.append(["貨品名稱", "數量"])
+                    for it in selected_items:
+                        ws2.append([it["name"], it["qty"]])
+                    ws2.append([])
+                    ws2.append(["合計件數", sum(it["qty"] for it in selected_items)])
+                    wb2.save(buf2)
+                    buf2.seek(0)
+                    fname2 = f"物流單_{recip_v}_{_val(sel_row[waybill_col])}.xlsx"
+                    st.download_button(
+                        "📥 下載物流單",
+                        data=buf2, file_name=fname2,
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="logistics_dl")
 
     # ── Active tracking links ─────────────────────────────────────────────────
     active = [
