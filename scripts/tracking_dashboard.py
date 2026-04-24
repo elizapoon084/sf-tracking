@@ -325,12 +325,25 @@ def main():
             if wb_val else '<span style="color:#ccc">—</span>'
         )
 
-        # ── 貨品 cell ─────────────────────────────────────────────────────────
-        items_cell = (
-            f'<span title="{_esc(items_v)}" style="cursor:help;">'
-            f'{_esc(items_v[:40])}{"…" if len(items_v) > 40 else ""}</span>'
-            if items_v else '<span style="color:#bbb;font-size:11px;">—</span>'
-        )
+        # ── 貨品 cell（點擊展開詳情）─────────────────────────────────────────
+        if items_v:
+            preview = items_v[:45] + ("…" if len(items_v) > 45 else "")
+            detail_lines = "".join(
+                f'<div style="padding:2px 0;border-bottom:1px solid #eee;">• {_esc(it.strip())}</div>'
+                for it in items_v.split(" / ") if it.strip()
+            )
+            items_cell = (
+                f'<details style="cursor:pointer;min-width:180px;">'
+                f'<summary style="color:#2980b9;font-size:12px;list-style:none;'
+                f'cursor:pointer;outline:none;">▶ {_esc(preview)}</summary>'
+                f'<div style="margin-top:6px;padding:8px 10px;background:#f0f8ff;'
+                f'border-radius:6px;border-left:3px solid #2980b9;'
+                f'font-size:12px;line-height:1.9;min-width:220px;">'
+                f'{detail_lines}</div>'
+                f'</details>'
+            )
+        else:
+            items_cell = '<span style="color:#bbb;font-size:11px;">—</span>'
 
         # ── 地址 cell ─────────────────────────────────────────────────────────
         dest_tag = _dest(addr_v)
@@ -413,7 +426,7 @@ def main():
         rows_html.append(f"""
         <tr style="{row_bg}border-bottom:1px solid #e9ecef;">
           <td style="padding:8px 10px;white-space:nowrap;font-size:12px;color:#666;">{_esc(date_v)}</td>
-          <td style="padding:8px 10px;font-size:14px;">{name_html}</td>
+          <td style="padding:8px 10px;font-size:14px;min-width:110px;">{name_html}</td>
           <td style="padding:8px 10px;">{wb_cell}</td>
           <td style="padding:8px 10px;">{items_cell}</td>
           <td style="padding:8px 10px;text-align:center;font-size:13px;">{_esc(qty_v)}</td>
@@ -430,7 +443,7 @@ def main():
     <thead>
     <tr style="background:#34495e;color:#fff;font-size:12px;letter-spacing:.5px;">
       <th style="padding:10px 10px;text-align:left;font-weight:600;">寄出時間</th>
-      <th style="padding:10px 10px;text-align:left;font-weight:600;">客人</th>
+      <th style="padding:10px 10px;text-align:left;font-weight:600;min-width:110px;">客人</th>
       <th style="padding:10px 10px;text-align:left;font-weight:600;">運單號</th>
       <th style="padding:10px 10px;text-align:left;font-weight:600;">貨品</th>
       <th style="padding:10px 10px;text-align:center;font-weight:600;">件</th>
