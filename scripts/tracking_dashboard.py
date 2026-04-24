@@ -52,6 +52,32 @@ SF_PUBLIC_TRACK = "https://www.sf-express.com/cn/sc/dynamic_function/waybill/#se
 
 # ── 稅金寫回 Excel ─────────────────────────────────────────────────────────────
 
+def _push_to_github() -> bool:
+    """Commit updated tracking.xlsx to GitHub (used in cloud mode)."""
+    try:
+        import base64, requests as _req
+        token   = st.secrets.get("GITHUB_TOKEN", "")
+        repo    = st.secrets.get("GITHUB_REPO", "elizapoon084/sf-tracking")
+        gh_path = st.secrets.get("GITHUB_FILE_PATH", "data/tracking.xlsx")
+        if not token:
+            return False
+        headers = {"Authorization": f"token {token}",
+                   "Accept": "application/vnd.github.v3+json"}
+        url = f"https://api.github.com/repos/{repo}/contents/{gh_path}"
+        sha = _req.get(url, headers=headers, timeout=15).json().get("sha", "")
+        with open(EXCEL_PATH, "rb") as f:
+            content = base64.b64encode(f.read()).decode()
+        from datetime import datetime
+        r = _req.put(url, headers=headers, timeout=30, json={
+            "message": f"cloud: 更新稅金 {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            "content": content, "sha": sha,
+        })
+        return r.status_code in (200, 201)
+    except Exception as e:
+        st.warning(f"⚠️ GitHub 同步失敗：{e}")
+        return False
+
+
 def _save_tax_values(changed_df: pd.DataFrame) -> int:
     """Write updated tax values back to tracking.xlsx. Returns count saved."""
     try:
@@ -70,6 +96,12 @@ def _save_tax_values(changed_df: pd.DataFrame) -> int:
                     saved += 1
                     break
         wb.save(EXCEL_PATH)
+        if _IS_CLOUD:
+            ok = _push_to_github()
+            if ok:
+                st.success("✅ 稅金已同步到 GitHub，本地 Excel 將在下次排程時更新")
+            else:
+                st.warning("⚠️ 本地儲存成功，但 GitHub 同步失敗，請檢查 Secrets 設定")
         return saved
     except Exception as e:
         st.error(f"儲存稅金失敗：{e}")
@@ -771,10 +803,13 @@ def main():
                 st.warning(f"找不到檔案：{pdf_path}")
 
     # ── 稅金輸入（本地專用）─────────────────────────────────────────────────────
-    if not _IS_CLOUD:
-        st.divider()
-        st.markdown("### 💰 稅金輸入")
+    st.divider()
+    st.markdown("### 💰 稅金輸入")
+    if _IS_CLOUD:
+        st.caption("直接喺稅金欄輸入金額，修改後自動同步到 GitHub → 本地 Excel")
+    else:
         st.caption("直接喺稅金欄輸入金額，修改後自動儲存到 Excel")
+    if True:
 
         tax_data = []
         for _, r in df.iterrows():

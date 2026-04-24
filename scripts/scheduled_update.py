@@ -18,12 +18,31 @@ from datetime import datetime
 sys.stdout.reconfigure(encoding="utf-8")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import browser_utils
+browser_utils.HEADLESS = True  # run silently in background, no Chrome window
+
 from excel_manager import ExcelManager
-from sf_china_scraper import scrape_all_waybills
+from status_updater import update_all_statuses
 from gsheets_sync import sync_excel_to_sheets
 from logger import get_logger
 
 log = get_logger("scheduled_update")
+
+
+def _pull_from_github() -> None:
+    """Pull latest changes from GitHub (picks up tax edits made on Streamlit Cloud)."""
+    repo_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    result = subprocess.run(
+        ["git", "pull"],
+        cwd=repo_dir, capture_output=True, text=True, encoding="utf-8"
+    )
+    msg = result.stdout.strip() or result.stderr.strip()
+    if result.returncode == 0:
+        log.info("git pull: %s", msg)
+        print(f"      git pull: {msg}")
+    else:
+        log.warning("git pull failed: %s", msg)
+        print(f"      ⚠️  git pull 失敗: {msg}")
 
 
 def _push_excel_to_github() -> None:
@@ -86,50 +105,28 @@ def run() -> None:
     print(f"\n{'='*55}")
     print(f"定時更新開始  {start:%Y-%m-%d %H:%M:%S}")
 
-    # ── 1. Scrape SF China waybill list ────────────────────────────────────────
-    print("\n[1/3] 正在爬取順豐中國網站運單列表…")
+    # ── 0. Pull latest from GitHub (picks up cloud tax edits) ─────────────────
+    print("\n[0/3] 同步 GitHub 最新資料（包括雲端稅金更新）…")
+    _pull_from_github()
+
+    # ── 1. Scrape SF HK waybill list (3 pages = ~30 waybills) + 電子存根 ────────
+    print("\n[1/3] 正在爬取順豐香港網站（3頁，最多30個運單）…")
     _close_chrome_if_running()
+    excel   = ExcelManager()
+    updated = 0
     try:
-        scraped = scrape_all_waybills()
-        print(f"      共爬取到 {len(scraped)} 個運單")
+        results = update_all_statuses(excel)
+        updated = len(results)
+        print(f"      共更新 {updated} 個運單：")
+        for wb, status in results.items():
+            print(f"      {wb} → {status}")
     except Exception as e:
         log.error("爬取失敗: %s", e)
         print(f"      ⚠️  爬取失敗: {e}")
-        scraped = []
 
-    # ── 2. Update local Excel statuses ─────────────────────────────────────────
-    print("\n[2/3] 更新本地 Excel 狀態…")
-    excel   = ExcelManager()
-    updated = 0
-    skipped = 0
-
-    if scraped:
-        # Build lookup: {waybill: {status, freight, status_time}}
-        scraped_map = {r["waybill"]: r for r in scraped}
-
-        for _row_num, wb in excel.get_all_waybills():
-            if wb in scraped_map:
-                info = scraped_map[wb]
-                status = info.get("status") or "狀態不明"
-                excel.update_status(
-                    wb,
-                    status,
-                    freight=info.get("freight", ""),
-                    status_time=info.get("status_time", ""),
-                )
-                print(f"      {wb} → {status}")
-                updated += 1
-            else:
-                skipped += 1
-
-        print(f"      已更新 {updated} 個，未匹配 {skipped} 個")
-    else:
-        print("      （無爬取資料，跳過 Excel 更新）")
-
-    # ── 3. Sync to Google Sheets ───────────────────────────────────────────────
-    print("\n[3/3] 同步到 Google Sheets…")
+    # ── 2. Sync to Google Sheets ───────────────────────────────────────────────
+    print("\n[2/3] 同步到 Google Sheets…")
     try:
-        # Read all Excel rows (skip header)
         ws = excel.ws
         all_rows = [
             [cell.value for cell in row]
@@ -145,8 +142,8 @@ def run() -> None:
         log.error("Sheets sync error: %s", e)
         print(f"      ⚠️  Sheets 同步失敗: {e}")
 
-    # ── 4. Push tracking.xlsx to GitHub → Streamlit Cloud auto-updates ────────
-    print("\n[4/4] 推送 tracking.xlsx 去 GitHub…")
+    # ── 3. Push tracking.xlsx to GitHub → Streamlit Cloud auto-updates ────────
+    print("\n[3/3] 推送 tracking.xlsx 去 GitHub…")
     _push_excel_to_github()
 
     # ── Done ───────────────────────────────────────────────────────────────────
