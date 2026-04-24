@@ -26,6 +26,41 @@ from logger import get_logger
 log = get_logger("scheduled_update")
 
 
+def _push_excel_to_github() -> None:
+    """Commit tracking.xlsx and push to GitHub so Streamlit Cloud updates."""
+    repo_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    excel_rel = os.path.join("data", "tracking.xlsx")
+    now_str   = datetime.now().strftime("%Y-%m-%d %H:%M")
+
+    def _git(*args):
+        return subprocess.run(
+            ["git"] + list(args),
+            cwd=repo_dir, capture_output=True, text=True, encoding="utf-8"
+        )
+
+    # Check if there's anything to commit
+    status = _git("status", "--porcelain", excel_rel)
+    if not status.stdout.strip():
+        print("      ℹ️  tracking.xlsx 無變化，略過推送")
+        log.info("Git push skipped — no changes in tracking.xlsx")
+        return
+
+    _git("add", excel_rel)
+    commit = _git("commit", "-m", f"auto: 更新運單狀態 {now_str}")
+    if commit.returncode != 0:
+        print(f"      ⚠️  git commit 失敗: {commit.stderr.strip()}")
+        log.error("git commit failed: %s", commit.stderr)
+        return
+
+    push = _git("push")
+    if push.returncode == 0:
+        print("      ✅ 已推送去 GitHub，Streamlit 將在數分鐘內更新")
+        log.info("Git push success → Streamlit Cloud will update")
+    else:
+        print(f"      ⚠️  git push 失敗: {push.stderr.strip()}")
+        log.error("git push failed: %s", push.stderr)
+
+
 def _close_chrome_if_running() -> None:
     """Kill all Chrome processes and wait until they're fully gone."""
     import time
@@ -109,6 +144,10 @@ def run() -> None:
     except Exception as e:
         log.error("Sheets sync error: %s", e)
         print(f"      ⚠️  Sheets 同步失敗: {e}")
+
+    # ── 4. Push tracking.xlsx to GitHub → Streamlit Cloud auto-updates ────────
+    print("\n[4/4] 推送 tracking.xlsx 去 GitHub…")
+    _push_excel_to_github()
 
     # ── Done ───────────────────────────────────────────────────────────────────
     elapsed = (datetime.now() - start).seconds
