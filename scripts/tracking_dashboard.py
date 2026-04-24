@@ -8,6 +8,7 @@ import subprocess
 
 import base64
 import io
+import json
 from collections import defaultdict
 from datetime import date as _date
 import streamlit as st
@@ -142,6 +143,42 @@ def _dest(addr: str) -> str:
 
 # ── Data loading ──────────────────────────────────────────────────────────────
 
+_SCRIPT_DIR2 = os.path.dirname(os.path.abspath(__file__))
+_PRODUCTS_JSON = (
+    os.path.join(_SCRIPT_DIR2, "..", "data", "products.json")
+    if _IS_CLOUD else
+    r"C:\Users\user\Desktop\順丰E順递\data\products.json"
+)
+
+@st.cache_data(ttl=300)
+def load_name_to_sku() -> dict:
+    """產品名稱 → SKU 反查表"""
+    try:
+        with open(_PRODUCTS_JSON, encoding="utf-8") as f:
+            data = json.load(f)
+        return {info.get("name", ""): sku for sku, info in data.items() if info.get("name")}
+    except Exception:
+        return {}
+
+
+def _parse_item(item_str: str) -> tuple:
+    """Parse '[SKU] Name×qty' or 'Name×qty' → (sku, name, qty).
+    Supports both × and x as quantity separator."""
+    s = item_str.strip()
+    sku = ""
+    if s.startswith("[") and "]" in s:
+        end = s.index("]")
+        sku = s[1:end].strip()
+        s = s[end + 1:].strip()
+    sep = "×" if "×" in s else ("x" if "x" in s else "")
+    if sep:
+        nm, q = s.rsplit(sep, 1)
+        try:
+            return sku, nm.strip(), int(q.strip())
+        except ValueError:
+            return sku, nm.strip(), 1
+    return sku, s, 0
+
 @st.cache_data(ttl=30)
 def load_orders() -> pd.DataFrame:
     if not os.path.exists(EXCEL_PATH):
@@ -224,6 +261,7 @@ def main():
 
     # ── Load data ─────────────────────────────────────────────────────────────
     df = load_orders()
+    name_to_sku = load_name_to_sku()   # 產品名 → SKU
     if df.empty:
         st.info("📭 暫無訂單記錄。")
         st.caption(f"Excel 路徑：{EXCEL_PATH}")
@@ -492,14 +530,15 @@ def main():
                     for item in _val(r[items_col]).split(" / "):
                         item = item.strip()
                         if item:
-                            if "×" in item:
-                                parts = item.rsplit("×", 1)
+                            sku_i, nm_i, qty_i = _parse_item(item)
+                            sku_tag = f"<span style='color:#888;font-size:11px;'>[{sku_i}]</span> " if sku_i else ""
+                            if qty_i:
                                 st.markdown(
-                                    f"　• **{parts[0].strip()}** &nbsp;×&nbsp; "
-                                    f"<span style='color:#e74c3c;font-weight:700;'>{parts[1].strip()} 件</span>",
+                                    f"　• {sku_tag}<b>{_esc(nm_i)}</b> &nbsp;×&nbsp; "
+                                    f"<span style='color:#e74c3c;font-weight:700;'>{qty_i} 件</span>",
                                     unsafe_allow_html=True)
                             else:
-                                st.markdown(f"　• {item}")
+                                st.markdown(f"　• {sku_tag}{_esc(nm_i)}", unsafe_allow_html=True)
 
     # ── 批次發貨清單 ──────────────────────────────────────────────────────────
     st.divider()
@@ -531,6 +570,7 @@ def main():
 
             if sel_orders and st.button("📊 生成合併發貨清單", type="primary"):
                 totals = defaultdict(int)
+                sku_map: dict[str, str] = {}
                 included_rows = []
                 for label in sel_orders:
                     for _, row in batch_pool.iterrows():
@@ -538,12 +578,13 @@ def main():
                             included_rows.append(row)
                             for item in _val(row[items_col]).split(" / "):
                                 item = item.strip()
-                                if "×" in item:
-                                    nm, q = item.rsplit("×", 1)
-                                    try:
-                                        totals[nm.strip()] += int(q.strip())
-                                    except ValueError:
-                                        totals[nm.strip()] += 1
+                                if not item:
+                                    continue
+                                sku_i, nm_i, qty_i = _parse_item(item)
+                                if qty_i:
+                                    totals[nm_i] += qty_i
+                                    if nm_i not in sku_map:
+                                        sku_map[nm_i] = sku_i or name_to_sku.get(nm_i, "")
                             break
 
                 if totals:
@@ -553,7 +594,11 @@ def main():
 
                     result_rows = sorted(totals.items(), key=lambda x: x[0])
                     st.dataframe(
-                        pd.DataFrame(result_rows, columns=["貨品名稱", "總數量"]),
+                        pd.DataFrame(
+                            [{"編號": sku_map.get(nm, name_to_sku.get(nm, "")),
+                              "貨品名稱": nm, "總數量": qty}
+                             for nm, qty in result_rows],
+                            columns=["編號", "貨品名稱", "總數量"]),
                         use_container_width=True, hide_index=True)
 
                     # ── 生成 Excel 下載 ──────────────────────────────────────
@@ -561,9 +606,9 @@ def main():
                     wb_out = openpyxl.Workbook()
                     ws_out = wb_out.active
                     ws_out.title = "發貨清單"
-                    ws_out.append(["貨品名稱", "總數量"])
+                    ws_out.append(["編號(SKU)", "貨品名稱", "總數量"])
                     for nm, qty in result_rows:
-                        ws_out.append([nm, qty])
+                        ws_out.append([sku_map.get(nm, name_to_sku.get(nm, "")), nm, qty])
                     ws_out.append([])
                     ws_out.append([f"共 {total_kinds} 種", f"合計 {total_qty} 件"])
                     ws_out.append([])
