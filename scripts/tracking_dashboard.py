@@ -802,58 +802,57 @@ def main():
             else:
                 st.warning(f"找不到檔案：{pdf_path}")
 
-    # ── 稅金輸入（本地專用）─────────────────────────────────────────────────────
+    # ── 稅金輸入 ──────────────────────────────────────────────────────────────
     st.divider()
     st.markdown("### 💰 稅金輸入")
     if _IS_CLOUD:
-        st.caption("直接喺稅金欄輸入金額，修改後自動同步到 GitHub → 本地 Excel")
+        st.caption("直接喺稅金欄輸入金額，修改後按「💾 儲存稅金」，自動同步到 GitHub → 本地 Excel")
     else:
-        st.caption("直接喺稅金欄輸入金額，修改後自動儲存到 Excel")
-    if True:
+        st.caption("直接喺稅金欄輸入金額，修改後按「💾 儲存稅金」")
 
-        tax_data = []
-        for _, r in df.iterrows():
-            wb_v     = _val(r[waybill_col])
-            date_v   = _val(r[date_col])
-            name_v   = _val(r[name_col])
-            status_v = _val(r[status_col])
-            tax_v    = r[tax_col] if tax_col and tax_col in df.columns else None
-            try:
-                tax_num = float(tax_v) if tax_v not in (None, "", "nan", "None") else None
-            except (ValueError, TypeError):
-                tax_num = None
-            tax_data.append({
-                "日期":      date_v,
-                "客人":      name_v,
-                "運單號":    wb_v,
-                "狀態":      status_v,
-                "稅金(HKD)": tax_num,
-            })
+    tax_data = []
+    for _, r in df.iterrows():
+        wb_v     = _val(r[waybill_col])
+        date_v   = _val(r[date_col])
+        name_v   = _val(r[name_col])
+        status_v = _val(r[status_col])
+        tax_v    = r[tax_col] if tax_col and tax_col in df.columns else None
+        try:
+            tax_num = float(tax_v) if tax_v not in (None, "", "nan", "None") else None
+        except (ValueError, TypeError):
+            tax_num = None
+        tax_data.append({
+            "日期":      date_v,
+            "客人":      name_v,
+            "運單號":    wb_v,
+            "狀態":      status_v,
+            "稅金(HKD)": tax_num,
+        })
 
-        tax_df = pd.DataFrame(tax_data)
-        edited = st.data_editor(
-            tax_df,
-            column_config={
-                "日期":      st.column_config.TextColumn("日期",   disabled=True, width="small"),
-                "客人":      st.column_config.TextColumn("客人",   disabled=True, width="small"),
-                "運單號":    st.column_config.TextColumn("運單號", disabled=True, width="medium"),
-                "狀態":      st.column_config.TextColumn("狀態",   disabled=True, width="small"),
-                "稅金(HKD)": st.column_config.NumberColumn(
-                    "稅金 (HKD)", min_value=0, step=0.1, format="%.1f", width="small",
-                ),
-            },
-            hide_index=True,
-            use_container_width=True,
-            key="tax_editor",
-        )
-        orig_tax = tax_df["稅金(HKD)"].fillna(-1)
-        edit_tax = edited["稅金(HKD)"].fillna(-1)
-        if (orig_tax != edit_tax).any():
-            saved = _save_tax_values(edited[orig_tax != edit_tax])
-            if saved:
-                st.success(f"✅ 已儲存 {saved} 筆稅金記錄")
-                st.cache_data.clear()
-                st.rerun()
+    tax_df = pd.DataFrame(tax_data)
+    edited = st.data_editor(
+        tax_df,
+        column_config={
+            "日期":      st.column_config.TextColumn("日期",   disabled=True, width="small"),
+            "客人":      st.column_config.TextColumn("客人",   disabled=True, width="small"),
+            "運單號":    st.column_config.TextColumn("運單號", disabled=True, width="medium"),
+            "狀態":      st.column_config.TextColumn("狀態",   disabled=True, width="small"),
+            "稅金(HKD)": st.column_config.NumberColumn(
+                "稅金 (HKD)", min_value=0, step=0.1, format="%.1f", width="small",
+            ),
+        },
+        hide_index=True,
+        use_container_width=True,
+        key="tax_editor",
+    )
+    if st.button("💾 儲存稅金", type="primary", key="save_tax_btn"):
+        saved = _save_tax_values(edited)
+        if saved:
+            st.success(f"✅ 已儲存 {saved} 筆稅金記錄")
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.info("沒有可儲存的記錄")
 
     # ── Auto-refresh ──────────────────────────────────────────────────────────
     st.divider()
