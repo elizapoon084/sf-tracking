@@ -48,7 +48,8 @@ _REPO_ROOT   = os.path.abspath(os.path.join(_SCRIPT_DIR, ".."))
 _CLOUD_EXCEL = os.path.join(_SCRIPT_DIR, "..", "data", "tracking.xlsx")
 EXCEL_PATH = _CLOUD_EXCEL if _IS_CLOUD else _LOCAL_EXCEL_PATH
 
-SF_PUBLIC_TRACK = "https://www.sf-express.com/cn/sc/dynamic_function/waybill/#search/bill-number/{}"
+SF_PUBLIC_TRACK  = "https://htm.sf-express.com/hk/tc/dynamic_function/waybill/#search/bill-number/{}"
+SF_BATCH_TRACK   = "https://htm.sf-express.com/hk/tc/dynamic_function/waybill/#search/bill-number/{}"
 _GH_RAW = "https://raw.githubusercontent.com/elizapoon084/sf-tracking/main/"
 
 
@@ -1040,36 +1041,65 @@ def main():
                     key="logistics_dl")
 
     # ── Active tracking links ─────────────────────────────────────────────────
-    active = [
-        (str(row[name_col]), str(row[waybill_col]))
-        for _, row in df.iterrows()
-        if row[waybill_col]
-        and str(row[waybill_col]) not in ("None", "")
-        and str(row[status_col]) not in ("None", "")
-        and "已簽收" not in str(row[status_col])
-        and "已取消" not in str(row[status_col])
-    ]
+    # Build active list with status included
+    active = []
+    for _, row in df.iterrows():
+        wb  = str(row[waybill_col] or "").strip()
+        st_ = str(row[status_col]  or "").strip()
+        nm  = _to_hant(_val(row[name_col]))
+        if wb and wb not in ("None", "") and st_ not in ("None", "") \
+                and "已簽收" not in st_ and "已取消" not in st_:
+            active.append((nm, wb, st_))
 
     if active:
         st.divider()
         st.markdown("### 🔗 在途快件 — 快速查詢")
-        cols = st.columns(min(len(active), 4))
-        for i, (name, wb) in enumerate(active[:12]):
+
+        # ── 取消追蹤狀態（session_state）────────────────────────────────────
+        if "dismissed_wbs" not in st.session_state:
+            st.session_state["dismissed_wbs"] = set()
+
+        # "重置" button to restore all dismissed
+        if st.session_state["dismissed_wbs"]:
+            if st.button("↺ 顯示全部（包括已取消追蹤）", key="restore_dismissed"):
+                st.session_state["dismissed_wbs"] = set()
+                st.rerun()
+
+        shown = [(nm, wb, st_) for nm, wb, st_ in active
+                 if wb not in st.session_state["dismissed_wbs"]]
+
+        # ── 批次查詢按鈕（最多 20 個）───────────────────────────────────────
+        if shown:
+            batch_wbs = ",".join(wb for _, wb, _ in shown[:20])
+            batch_url = SF_BATCH_TRACK.format(batch_wbs)
+            st.markdown(
+                f'<a href="{batch_url}" target="_blank" style="display:inline-block;'
+                f'background:#e67e22;color:#fff;padding:8px 18px;border-radius:8px;'
+                f'text-decoration:none;font-weight:600;font-size:13px;margin-bottom:12px;">'
+                f'🔍 在SF香港網批次查詢全部（{len(shown[:20])}個）</a>',
+                unsafe_allow_html=True)
+
+        # ── 快件卡片 + 取消追蹤按鈕 ─────────────────────────────────────────
+        cols = st.columns(min(len(shown), 4)) if shown else []
+        for i, (nm, wb, st_) in enumerate(shown[:20]):
             with cols[i % 4]:
-                status_now = str(df.loc[df[waybill_col].astype(str) == wb, status_col].values[0] if len(df.loc[df[waybill_col].astype(str) == wb]) else "")
                 badge_color = "#2980b9"
                 for kw, (c, _) in _STATUS_COLOR.items():
-                    if kw in status_now:
+                    if kw in st_:
                         badge_color = c; break
                 st.markdown(
                     f'<a href="{SF_PUBLIC_TRACK.format(wb)}" target="_blank" style="'
                     f'display:block;background:{badge_color};color:#fff;'
                     f'padding:10px 14px;border-radius:8px;text-decoration:none;'
                     f'margin:4px 0;font-size:13px;line-height:1.5;">'
-                    f'<b>{name}</b><br>'
+                    f'<b>{nm}</b><br>'
                     f'<span style="font-family:monospace;font-size:11px;opacity:.9">{wb}</span><br>'
-                    f'<span style="font-size:11px;opacity:.85">{status_now}</span></a>',
+                    f'<span style="font-size:11px;opacity:.85">{st_}</span></a>',
                     unsafe_allow_html=True)
+                if st.button("✓ 取消追蹤", key=f"dismiss_{wb}",
+                             use_container_width=True):
+                    st.session_state["dismissed_wbs"].add(wb)
+                    st.rerun()
 
     # ── 小票 & 運單 & Word 下載 ────────────────────────────────────────────────
     st.divider()
