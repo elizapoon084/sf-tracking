@@ -1093,7 +1093,13 @@ with sync_playwright() as pw:
             # ── 寫入 Excel 追蹤表 ────────────────────────────────────────────
             append_order_to_excel(order, waybill, pdf_rel, pos_order_no)
 
-            # ── 同步 tracking.xlsx + 三個檔案到 GitHub → Streamlit App ─────────
+            sf_page.close()
+
+            # ── Step 15: 返 POS 銷售記錄下載 Word 清單 ──────────────────────
+            print(f"\n▶ Step 15: 下載 POS 銷售記錄 Word 清單 ({pos_order_no})")
+            download_pos_word(ctx, pos_order_no, save_dir, DEMO_CUSTOMER)
+
+            # ── 同步全部檔案到 GitHub（Word 下載完先 push，確保三個齊全）────────
             try:
                 _REPO = r"C:\Users\user\Desktop\順丰E順递"
                 subprocess.run(
@@ -1107,15 +1113,9 @@ with sync_playwright() as pw:
                 subprocess.run(
                     ["git", "-C", _REPO, "push", "origin", "main"],
                     capture_output=True, check=True)
-                print("  ☁️  追蹤表 + 小票 + 運單 + Word 已同步到雲端")
+                print("  ☁️  小票 + 運單 + Word + 追蹤表 已同步到雲端 Streamlit")
             except Exception as _ge:
                 print(f"  ⚠️  雲端同步失敗（唔影響本地）: {_ge}")
-
-            sf_page.close()
-
-            # ── Step 15: 返 POS 銷售記錄下載 Word 清單 ──────────────────────
-            print(f"\n▶ Step 15: 下載 POS 銷售記錄 Word 清單 ({pos_order_no})")
-            download_pos_word(ctx, pos_order_no, save_dir, DEMO_CUSTOMER)
 
             success_count += 1
             completed_orders.append((DEMO_CUSTOMER, waybill, pdf_path))
