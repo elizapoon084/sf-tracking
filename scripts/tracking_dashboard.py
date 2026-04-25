@@ -75,7 +75,14 @@ def _file_links_html(pdf_rel: str) -> str:
             if "運單" in fname:
                 icon, label, color = "📦", "運單", "#2980b9"
             elif fname.endswith((".doc", ".docx")):
-                icon, label, color = "📝", "清單", "#8e44ad"
+                # Raw GitHub URL renders .doc HTML in browser — show as non-link badge
+                parts.append(
+                    f'<span style="font-size:11px;color:#8e44ad;display:inline-block;'
+                    f'margin:2px 1px;background:#f8f9fa;padding:2px 7px;border-radius:4px;'
+                    f'border:1px solid #dee2e6;white-space:nowrap;" '
+                    f'title="請用下方「訂單檔案下載」下載 Word 清單">📝 清單↓</span>'
+                )
+                continue
             elif fname.endswith((".pdf", ".png")):
                 icon, label, color = "🧾", "小票", "#27ae60"
             else:
@@ -672,6 +679,7 @@ def main():
     </table></div>"""
 
     st.markdown(table_html, unsafe_allow_html=True)
+    st.caption("📝 Word清單請在下方「訂單檔案下載」區域下載（直接點擊表格鏈結只適用於 PDF）")
 
     # ── 訂單貨品詳情 ──────────────────────────────────────────────────────────
     st.divider()
@@ -764,18 +772,8 @@ def main():
                 if totals:
                     total_kinds = len(totals)
                     total_qty   = sum(totals.values())
-                    st.markdown(f"#### ✅ 合併結果：{total_kinds} 種貨品，共 {total_qty} 件")
-
                     result_rows = sorted(totals.items(), key=lambda x: x[0])
-                    st.dataframe(
-                        pd.DataFrame(
-                            [{"編號": sku_map.get(nm, name_to_sku.get(nm, "")),
-                              "貨品名稱": nm, "總數量": qty}
-                             for nm, qty in result_rows],
-                            columns=["編號", "貨品名稱", "總數量"]),
-                        use_container_width=True, hide_index=True)
 
-                    # ── 生成 Excel 下載 ──────────────────────────────────────
                     buf = io.BytesIO()
                     wb_out = openpyxl.Workbook()
                     ws_out = wb_out.active
@@ -794,13 +792,36 @@ def main():
                             _val(row[waybill_col]), _val(row[items_col]),
                         ])
                     wb_out.save(buf)
-                    buf.seek(0)
 
                     fname = f"發貨清單_{sel_cust}_{_date.today().strftime('%Y%m%d')}.xlsx"
-                    st.download_button(
-                        "📥 下載 Excel 發貨清單",
-                        data=buf, file_name=fname,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                    # Store in session_state so download button survives page rerun
+                    st.session_state["batch_result"] = {
+                        "bytes":       buf.getvalue(),
+                        "fname":       fname,
+                        "result_rows": result_rows,
+                        "total_kinds": total_kinds,
+                        "total_qty":   total_qty,
+                        "sku_map":     sku_map,
+                    }
+
+            # Show result & download button outside the button block so it persists
+            if st.session_state.get("batch_result"):
+                res = st.session_state["batch_result"]
+                st.markdown(
+                    f"#### ✅ 合併結果：{res['total_kinds']} 種貨品，共 {res['total_qty']} 件")
+                st.dataframe(
+                    pd.DataFrame(
+                        [{"編號": res["sku_map"].get(nm, name_to_sku.get(nm, "")),
+                          "貨品名稱": nm, "總數量": qty}
+                         for nm, qty in res["result_rows"]],
+                        columns=["編號", "貨品名稱", "總數量"]),
+                    use_container_width=True, hide_index=True)
+                st.download_button(
+                    "📥 下載 Excel 發貨清單",
+                    data=res["bytes"],
+                    file_name=res["fname"],
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="batch_dl")
 
     # ── 製作物流單 ────────────────────────────────────────────────────────────
     st.divider()
