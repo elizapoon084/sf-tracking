@@ -61,40 +61,64 @@ def _resolve_path(rel_or_abs: str) -> str:
     return os.path.join(_REPO_ROOT, rel_or_abs)
 
 
+import re as _re
+_SF_NUM_RE = _re.compile(r'SF\d{15,}', _re.IGNORECASE)
+
+
 def _file_links_html(pdf_rel: str) -> str:
     """Return HTML download links for the 3 order files (小票/運單/清單)."""
+    import base64 as _b64
     from urllib.parse import quote as _q
     if not pdf_rel:
         return '<span style="color:#ddd;font-size:11px;">—</span>'
     order_dir_rel = os.path.dirname(pdf_rel).replace("\\", "/")
-    order_dir_abs = _resolve_path(pdf_rel)
-    order_dir_abs = os.path.dirname(order_dir_abs)
+    order_dir_abs = os.path.dirname(_resolve_path(pdf_rel))
     parts = []
+    ticket_added = False   # prevent duplicate 小票 badges
     if os.path.isdir(order_dir_abs):
         for fname in sorted(os.listdir(order_dir_abs)):
-            if "運單" in fname:
-                icon, label, color = "📦", "運單", "#2980b9"
-            elif fname.endswith((".doc", ".docx")):
-                # Raw GitHub URL renders .doc HTML in browser — show as non-link badge
+            fpath = os.path.join(order_dir_abs, fname)
+            # ── Word 清單: use base64 data URI so download attribute works ────
+            if fname.endswith((".doc", ".docx")):
+                try:
+                    with open(fpath, "rb") as _f:
+                        _enc = _b64.b64encode(_f.read()).decode()
+                    _mime = ("application/vnd.openxmlformats-officedocument"
+                             ".wordprocessingml.document"
+                             if fname.endswith(".docx") else "application/msword")
+                    parts.append(
+                        f'<a href="data:{_mime};base64,{_enc}" download="{fname}" '
+                        f'style="font-size:11px;color:#8e44ad;text-decoration:none;'
+                        f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
+                        f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
+                        f'white-space:nowrap;">📝 清單</a>'
+                    )
+                except Exception:
+                    parts.append('<span style="font-size:11px;color:#8e44ad;">📝 清單</span>')
+                continue
+            # ── SF waybill PDF: "運單" in name OR SF-number pattern in name ───
+            if fname.endswith((".pdf", ".png")) and (
+                    "運單" in fname or _SF_NUM_RE.search(fname)):
+                url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
                 parts.append(
-                    f'<span style="font-size:11px;color:#8e44ad;display:inline-block;'
-                    f'margin:2px 1px;background:#f8f9fa;padding:2px 7px;border-radius:4px;'
-                    f'border:1px solid #dee2e6;white-space:nowrap;" '
-                    f'title="請用下方「訂單檔案下載」下載 Word 清單">📝 清單↓</span>'
+                    f'<a href="{url}" target="_blank" '
+                    f'style="font-size:11px;color:#2980b9;text-decoration:none;'
+                    f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
+                    f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
+                    f'white-space:nowrap;">📦 運單</a>'
                 )
                 continue
-            elif fname.endswith((".pdf", ".png")):
-                icon, label, color = "🧾", "小票", "#27ae60"
-            else:
-                continue
-            url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
-            parts.append(
-                f'<a href="{url}" target="_blank" '
-                f'style="font-size:11px;color:{color};text-decoration:none;'
-                f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
-                f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
-                f'white-space:nowrap;">{icon} {label}</a>'
-            )
+            # ── POS receipt (小票): first plain PDF/PNG without SF number ─────
+            if fname.endswith((".pdf", ".png")) and not ticket_added:
+                url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
+                parts.append(
+                    f'<a href="{url}" target="_blank" '
+                    f'style="font-size:11px;color:#27ae60;text-decoration:none;'
+                    f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
+                    f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
+                    f'white-space:nowrap;">🧾 小票</a>'
+                )
+                ticket_added = True
     return "<br>".join(parts) if parts else '<span style="color:#ddd;font-size:11px;">—</span>'
 
 
