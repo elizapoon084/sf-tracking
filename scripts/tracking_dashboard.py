@@ -44,10 +44,20 @@ except Exception:
 
 # 雲端用相對路徑，本地用 config.py 的絕對路徑
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_REPO_ROOT   = os.path.abspath(os.path.join(_SCRIPT_DIR, ".."))
 _CLOUD_EXCEL = os.path.join(_SCRIPT_DIR, "..", "data", "tracking.xlsx")
 EXCEL_PATH = _CLOUD_EXCEL if _IS_CLOUD else _LOCAL_EXCEL_PATH
 
 SF_PUBLIC_TRACK = "https://www.sf-express.com/cn/sc/dynamic_function/waybill/#search/bill-number/{}"
+
+
+def _resolve_path(rel_or_abs: str) -> str:
+    """Resolve a path that may be repo-relative (data/orders/...) or absolute."""
+    if not rel_or_abs:
+        return ""
+    if os.path.isabs(rel_or_abs):
+        return rel_or_abs
+    return os.path.join(_REPO_ROOT, rel_or_abs)
 
 
 # ── 稅金寫回 Excel ─────────────────────────────────────────────────────────────
@@ -807,36 +817,64 @@ def main():
                     f'<span style="font-size:11px;opacity:.85">{status_now}</span></a>',
                     unsafe_allow_html=True)
 
-    # ── 小票 PDF 預覽 ─────────────────────────────────────────────────────────
+    # ── 小票 & 運單 & Word 下載 ────────────────────────────────────────────────
     st.divider()
-    st.markdown("### 🧾 小票預覽")
+    st.markdown("### 🗂️ 訂單檔案下載")
+    st.caption("小票 PDF、順豐運單 PDF、POS Word 清單 — 同事可直接下載列印")
 
     pdf_col  = df.columns[COL_PDF_PATH - 1]
-    has_pdf  = df[pdf_col].apply(lambda v: bool(_val(v)) and os.path.exists(_val(v)))
+    has_pdf  = df[pdf_col].apply(
+        lambda v: bool(_val(v)) and os.path.exists(_resolve_path(_val(v))))
     pdf_rows = df[has_pdf]
 
     if pdf_rows.empty:
-        st.info("暫無小票檔案（完成寄件後自動出現）")
+        st.info("暫無檔案（完成寄件後自動出現）")
     else:
         options = [
-            f"{_val(r[date_col])}  {_val(r[name_col])}  {_val(r[waybill_col])}"
+            f"{_val(r[date_col])}  {_to_hant(_val(r[name_col]))}  {_val(r[waybill_col])}"
             for _, r in pdf_rows.iterrows()
         ]
-        selected = st.selectbox("選擇訂單", options[::-1])   # 最新在最頂
+        selected = st.selectbox("選擇訂單", options[::-1], key="file_sel")
         if selected:
-            sel_row  = pdf_rows.iloc[len(options) - 1 - options[::-1].index(selected)]
-            pdf_path = _val(sel_row[pdf_col])
-            if os.path.exists(pdf_path):
-                with open(pdf_path, "rb") as f:
+            sel_row   = pdf_rows.iloc[len(options) - 1 - options[::-1].index(selected)]
+            pdf_rel   = _val(sel_row[pdf_col])
+            pdf_abs   = _resolve_path(pdf_rel)
+            order_dir = os.path.dirname(pdf_abs)
+
+            # List all files in the order folder
+            if os.path.isdir(order_dir):
+                files = sorted(os.listdir(order_dir))
+                col_files = st.columns(min(len(files), 3))
+                for idx, fname in enumerate(files):
+                    fpath = os.path.join(order_dir, fname)
+                    if fname.endswith(".pdf"):
+                        mime = "application/pdf"
+                        icon = "📄 小票" if "運單" not in fname else "📦 運單"
+                    elif fname.endswith((".doc", ".docx")):
+                        mime = "application/msword"
+                        icon = "📝 POS清單"
+                    else:
+                        mime = "application/octet-stream"
+                        icon = "📎 " + fname
+                    with open(fpath, "rb") as f:
+                        col_files[idx % 3].download_button(
+                            label=icon, data=f.read(),
+                            file_name=fname, mime=mime,
+                            key=f"dl_{fname}_{idx}")
+
+            # PDF inline preview (小票 only, local mode works best)
+            if os.path.exists(pdf_abs) and pdf_abs.endswith(".pdf"):
+                with open(pdf_abs, "rb") as f:
                     b64 = base64.b64encode(f.read()).decode()
                 st.markdown(
                     f'<iframe src="data:application/pdf;base64,{b64}" '
-                    f'width="100%" height="700" type="application/pdf">'
+                    f'width="100%" height="600" type="application/pdf">'
                     f'</iframe>',
-                    unsafe_allow_html=True,
-                )
+                    unsafe_allow_html=True)
+            elif os.path.exists(pdf_abs) and pdf_abs.endswith(".png"):
+                st.image(pdf_abs)
             else:
-                st.warning(f"找不到檔案：{pdf_path}")
+                st.caption(f"（預覽僅限本地，雲端請用上方下載按鈕）")
 
     # ── 稅金輸入 ──────────────────────────────────────────────────────────────
     st.divider()

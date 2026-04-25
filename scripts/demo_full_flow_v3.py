@@ -29,7 +29,8 @@ from playwright.sync_api import sync_playwright
 # ─── 系統路徑 & URL (唔需要改) ────────────────────────────────────────────────
 
 CHROME_PROFILE  = r"C:\ChromeAutomation"
-IMAGES_DIR      = r"C:\Users\user\Desktop\順丰E順递\Images"
+IMAGES_DIR      = r"C:\Users\user\Desktop\順丰E順递\Images"   # local backup only
+ORDERS_DIR      = r"C:\Users\user\Desktop\順丰E順递\data\orders"  # git-tracked → Streamlit Cloud
 LOGS_DIR        = r"C:\Users\user\Desktop\順丰E順递\logs"
 PRODUCTS_JSON   = r"C:\Users\user\Desktop\順丰E順递\data\products.json"
 MONTHLY_ACCOUNT = "8526937071"
@@ -626,13 +627,13 @@ with sync_playwright() as pw:
             print(f"  ✅ POS 訂單號: {pos_order_no}")
 
             print("\n▶ Step 5: 儲存小票到客人 Folder")
-            # 每張單建一個子 folder：客人名/客人名_日期_ORD/
             order_folder_name = f"{DEMO_CUSTOMER}_{today}_{pos_order_no}"
-            save_dir = os.path.join(IMAGES_DIR, DEMO_CUSTOMER, order_folder_name)
+            save_dir  = os.path.join(ORDERS_DIR, order_folder_name)  # git-tracked
             os.makedirs(save_dir, exist_ok=True)
             file_base = f"{DEMO_CUSTOMER}_{today}_{pos_order_no}"
             pdf_path  = os.path.join(save_dir, file_base + ".pdf")
             png_path  = os.path.join(save_dir, file_base + ".png")
+            pdf_rel   = f"data/orders/{order_folder_name}/{file_base}.pdf"  # relative path for Excel + cloud
 
             # 按藍色 DOWNLOAD 按鈕，Playwright 攔截下載並儲存到客人 folder
             try:
@@ -654,6 +655,7 @@ with sync_playwright() as pw:
                 print(f"  ⚠️  下載攔截失敗，改截圖備份: {dl_err}")
                 pos_page.screenshot(path=png_path, full_page=False)
                 pdf_path = png_path
+                pdf_rel  = f"data/orders/{order_folder_name}/{file_base}.png"
                 print(f"  ✅ 截圖備份: {png_path}")
 
             try:
@@ -1089,13 +1091,14 @@ with sync_playwright() as pw:
                 print(f"  ⚠️  列印電子運單失敗: {e}")
 
             # ── 寫入 Excel 追蹤表 ────────────────────────────────────────────
-            append_order_to_excel(order, waybill, pdf_path, pos_order_no)
+            append_order_to_excel(order, waybill, pdf_rel, pos_order_no)
 
-            # ── 同步 tracking.xlsx 到 GitHub → Streamlit App 即時更新 ────────
+            # ── 同步 tracking.xlsx + 三個檔案到 GitHub → Streamlit App ─────────
             try:
                 _REPO = r"C:\Users\user\Desktop\順丰E順递"
                 subprocess.run(
-                    ["git", "-C", _REPO, "add", "data/tracking.xlsx"],
+                    ["git", "-C", _REPO, "add", "data/tracking.xlsx",
+                     f"data/orders/{order_folder_name}"],
                     capture_output=True, check=True)
                 subprocess.run(
                     ["git", "-C", _REPO, "commit", "-m",
@@ -1104,7 +1107,7 @@ with sync_playwright() as pw:
                 subprocess.run(
                     ["git", "-C", _REPO, "push", "origin", "main"],
                     capture_output=True, check=True)
-                print("  ☁️  追蹤表已同步到雲端 Streamlit App")
+                print("  ☁️  追蹤表 + 小票 + 運單 + Word 已同步到雲端")
             except Exception as _ge:
                 print(f"  ⚠️  雲端同步失敗（唔影響本地）: {_ge}")
 
