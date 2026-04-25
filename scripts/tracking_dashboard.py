@@ -882,7 +882,9 @@ def main():
                 else:
                     parsed.append((it, 1))
 
-            selected_items = []
+            # Track all items (including unchecked) for the preview record
+            all_items_record = []
+            selected_items   = []
             for idx2, (nm, orig) in enumerate(parsed):
                 c1, c2, c3 = st.columns([0.04, 0.62, 0.34])
                 with c1:
@@ -895,32 +897,68 @@ def main():
                         value=orig, step=1,
                         key=f"lqty_{sel_lkey}_{idx2}",
                         label_visibility="collapsed")
+                final = qty2 if chk else 0
+                all_items_record.append({"name": nm, "orig": orig, "final": final})
                 if chk and qty2 > 0:
                     selected_items.append({"name": nm, "qty": qty2})
 
+            # ── 更改確認預覽（永遠顯示）──────────────────────────────────────
+            if all_items_record:
+                has_changes = any(r["orig"] != r["final"] for r in all_items_record)
+                label = "**📋 更改確認 — 請核對後再下載：**" if has_changes else "**📋 貨品確認：**"
+                st.markdown(label)
+                prev_rows = []
+                for r in all_items_record:
+                    diff = r["final"] - r["orig"]
+                    if r["final"] == 0:
+                        chg = "❌ 已剔除"
+                    elif diff < 0:
+                        chg = f"📉 減少 {abs(diff)} 件"
+                    elif diff > 0:
+                        chg = f"📈 增加 {diff} 件"
+                    else:
+                        chg = "✅ 不變"
+                    prev_rows.append({
+                        "貨品名稱": r["name"],
+                        "原訂數量": r["orig"],
+                        "最終數量": r["final"],
+                        "狀態":     chg,
+                    })
+                st.dataframe(
+                    pd.DataFrame(prev_rows),
+                    hide_index=True, use_container_width=True,
+                    column_config={
+                        "貨品名稱": st.column_config.TextColumn("貨品名稱"),
+                        "原訂數量": st.column_config.NumberColumn("原訂", width="small"),
+                        "最終數量": st.column_config.NumberColumn("最終", width="small"),
+                        "狀態":     st.column_config.TextColumn("狀態",  width="medium"),
+                    })
+
+            # ── 下載按鈕（直接從當前 widget 狀態生成，不需中間 Export 按鈕）──
             if selected_items:
-                if st.button("📥 匯出物流單 Excel", type="primary", key="logistics_export"):
-                    buf2 = io.BytesIO()
-                    wb2  = openpyxl.Workbook()
-                    ws2  = wb2.active
-                    ws2.title = "物流單"
-                    ws2.append(["收件人", recip_v])
-                    ws2.append(["電話",   ph_v])
-                    ws2.append(["地址",   addr_v2])
-                    ws2.append([])
-                    ws2.append(["貨品名稱", "數量"])
-                    for it in selected_items:
-                        ws2.append([it["name"], it["qty"]])
-                    ws2.append([])
-                    ws2.append(["合計件數", sum(it["qty"] for it in selected_items)])
-                    wb2.save(buf2)
-                    buf2.seek(0)
-                    fname2 = f"物流單_{recip_v}_{_val(sel_row[waybill_col])}.xlsx"
-                    st.download_button(
-                        "📥 下載物流單",
-                        data=buf2, file_name=fname2,
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="logistics_dl")
+                buf2 = io.BytesIO()
+                wb2  = openpyxl.Workbook()
+                ws2  = wb2.active
+                ws2.title = "物流單"
+                ws2.append(["收件人", recip_v])
+                ws2.append(["電話",   ph_v])
+                ws2.append(["地址",   addr_v2])
+                ws2.append([])
+                ws2.append(["貨品名稱", "原訂數量", "最終數量", "備註"])
+                for r in all_items_record:
+                    note = ("" if r["orig"] == r["final"] else
+                            "已剔除" if r["final"] == 0 else
+                            f"由 {r['orig']} 調整為 {r['final']}")
+                    ws2.append([r["name"], r["orig"], r["final"], note])
+                ws2.append([])
+                ws2.append(["合計件數", "", sum(it["qty"] for it in selected_items), ""])
+                wb2.save(buf2)
+                fname2 = f"物流單_{recip_v}_{_val(sel_row[waybill_col])}.xlsx"
+                st.download_button(
+                    "📥 下載物流單 Excel",
+                    data=buf2.getvalue(), file_name=fname2,
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    key="logistics_dl")
 
     # ── Active tracking links ─────────────────────────────────────────────────
     active = [
