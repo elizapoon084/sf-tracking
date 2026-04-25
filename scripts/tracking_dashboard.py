@@ -357,24 +357,43 @@ def main():
                     "選擇要取消的訂單", ["— 請選擇 —"] + cancel_opts,
                     key="cancel_sel", label_visibility="collapsed")
                 if cancel_pick != "— 請選擇 —":
+                    _del_files = st.checkbox("同時刪除本地及雲端檔案（小票/運單/Word）",
+                                             value=True, key="cancel_del_files")
                     if st.button("🗑️ 確認取消此訂單", use_container_width=True,
                                  type="secondary", key="cancel_btn"):
                         _wb_cancel = cancel_pick.split("  ")[-1].strip()
                         try:
+                            import subprocess as _sp2, shutil
+                            _repo2 = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+                            # 1. Mark cancelled in Excel
+                            _pdf_rel = ""
                             _wb2 = openpyxl.load_workbook(EXCEL_PATH)
                             _ws2 = _wb2[EXCEL_SHEET]
                             for _row in _ws2.iter_rows(min_row=2):
                                 if str(_row[COL_WAYBILL - 1].value or "").strip() == _wb_cancel:
                                     _row[COL_STATUS - 1].value = "已取消"
+                                    _pdf_rel = str(_row[COL_PDF_PATH - 1].value or "")
                                     break
                             _wb2.save(EXCEL_PATH)
-                            st.success(f"✅ {_wb_cancel} 已標記為取消")
-                            import subprocess as _sp2
-                            _repo2 = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+
+                            # 2. Delete order folder (local + git)
+                            if _del_files and _pdf_rel:
+                                _order_dir = os.path.dirname(_resolve_path(_pdf_rel))
+                                if os.path.isdir(_order_dir):
+                                    _sp2.run(["git", "rm", "-r", "--cached",
+                                              os.path.relpath(_order_dir, _repo2)],
+                                             cwd=_repo2, capture_output=True)
+                                    shutil.rmtree(_order_dir, ignore_errors=True)
+
+                            # 3. Commit + push
                             _sp2.run(["git", "add", "data/tracking.xlsx"], cwd=_repo2)
                             _sp2.run(["git", "commit", "-m", f"cancel: {_wb_cancel}"],
                                      cwd=_repo2, capture_output=True)
                             _sp2.run(["git", "push"], cwd=_repo2, capture_output=True)
+
+                            _msg = "已取消並刪除相關檔案" if _del_files else "已標記為取消"
+                            st.success(f"✅ {_wb_cancel} {_msg}")
                             st.cache_data.clear()
                             st.rerun()
                         except Exception as _ce:
