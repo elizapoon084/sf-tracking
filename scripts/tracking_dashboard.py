@@ -296,7 +296,44 @@ def main():
                 st.cache_data.clear()
                 st.rerun()
 
-            if st.button("☁️ 立即同步到雲端", use_container_width=True):
+            st.divider()
+        st.markdown("#### ❌ 取消訂單")
+        cancel_opts = [
+            f"{_val(r[date_col])}  {_to_hant(_val(r[name_col]))}  {_val(r[waybill_col])}"
+            for _, r in df.iterrows()
+            if _val(r[waybill_col]) and "已取消" not in _val(r[status_col])
+               and "已簽收" not in _val(r[status_col])
+        ]
+        if cancel_opts:
+            cancel_pick = st.selectbox("選擇要取消的訂單", ["— 請選擇 —"] + cancel_opts,
+                                       key="cancel_sel", label_visibility="collapsed")
+            if cancel_pick != "— 請選擇 —":
+                if st.button("🗑️ 確認取消此訂單", use_container_width=True,
+                             type="secondary", key="cancel_btn"):
+                    _wb_cancel = cancel_pick.split("  ")[-1].strip()
+                    try:
+                        _wb2 = openpyxl.load_workbook(EXCEL_PATH)
+                        _ws2 = _wb2[EXCEL_SHEET]
+                        for _row in _ws2.iter_rows(min_row=2):
+                            if str(_row[COL_WAYBILL - 1].value or "").strip() == _wb_cancel:
+                                _row[COL_STATUS - 1].value = "已取消"
+                                break
+                        _wb2.save(EXCEL_PATH)
+                        st.success(f"✅ {_wb_cancel} 已標記為取消")
+                        # Auto push to GitHub
+                        import subprocess as _sp2
+                        _repo2 = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                        _sp2.run(["git", "add", "data/tracking.xlsx"], cwd=_repo2)
+                        _sp2.run(["git", "commit", "-m", f"cancel: {_wb_cancel}"], cwd=_repo2,
+                                 capture_output=True)
+                        _sp2.run(["git", "push"], cwd=_repo2, capture_output=True)
+                        st.cache_data.clear()
+                        st.rerun()
+                    except Exception as _ce:
+                        st.error(f"取消失敗：{_ce}")
+
+        st.divider()
+        if st.button("☁️ 立即同步到雲端", use_container_width=True):
                 with st.spinner("正在推送到 GitHub…"):
                     _repo = os.path.abspath(
                         os.path.join(os.path.dirname(__file__), ".."))
