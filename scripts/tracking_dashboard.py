@@ -296,66 +296,6 @@ def main():
                 st.cache_data.clear()
                 st.rerun()
 
-            st.divider()
-        st.markdown("#### ❌ 取消訂單")
-        cancel_opts = [
-            f"{_val(r[date_col])}  {_to_hant(_val(r[name_col]))}  {_val(r[waybill_col])}"
-            for _, r in df.iterrows()
-            if _val(r[waybill_col]) and "已取消" not in _val(r[status_col])
-               and "已簽收" not in _val(r[status_col])
-        ]
-        if cancel_opts:
-            cancel_pick = st.selectbox("選擇要取消的訂單", ["— 請選擇 —"] + cancel_opts,
-                                       key="cancel_sel", label_visibility="collapsed")
-            if cancel_pick != "— 請選擇 —":
-                if st.button("🗑️ 確認取消此訂單", use_container_width=True,
-                             type="secondary", key="cancel_btn"):
-                    _wb_cancel = cancel_pick.split("  ")[-1].strip()
-                    try:
-                        _wb2 = openpyxl.load_workbook(EXCEL_PATH)
-                        _ws2 = _wb2[EXCEL_SHEET]
-                        for _row in _ws2.iter_rows(min_row=2):
-                            if str(_row[COL_WAYBILL - 1].value or "").strip() == _wb_cancel:
-                                _row[COL_STATUS - 1].value = "已取消"
-                                break
-                        _wb2.save(EXCEL_PATH)
-                        st.success(f"✅ {_wb_cancel} 已標記為取消")
-                        # Auto push to GitHub
-                        import subprocess as _sp2
-                        _repo2 = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-                        _sp2.run(["git", "add", "data/tracking.xlsx"], cwd=_repo2)
-                        _sp2.run(["git", "commit", "-m", f"cancel: {_wb_cancel}"], cwd=_repo2,
-                                 capture_output=True)
-                        _sp2.run(["git", "push"], cwd=_repo2, capture_output=True)
-                        st.cache_data.clear()
-                        st.rerun()
-                    except Exception as _ce:
-                        st.error(f"取消失敗：{_ce}")
-
-        st.divider()
-        if st.button("☁️ 立即同步到雲端", use_container_width=True):
-                with st.spinner("正在推送到 GitHub…"):
-                    _repo = os.path.abspath(
-                        os.path.join(os.path.dirname(__file__), ".."))
-                    _excel_rel = os.path.join("data", "tracking.xlsx")
-                    import subprocess as _sp
-                    from datetime import datetime as _dt
-                    _now = _dt.now().strftime("%Y-%m-%d %H:%M")
-                    _st = _sp.run(["git", "status", "--porcelain", _excel_rel],
-                                  cwd=_repo, capture_output=True, text=True)
-                    if _st.stdout.strip():
-                        _sp.run(["git", "add", _excel_rel], cwd=_repo)
-                        _sp.run(["git", "commit", "-m", f"manual sync: {_now}"],
-                                cwd=_repo, capture_output=True)
-                        _r = _sp.run(["git", "push"], cwd=_repo,
-                                     capture_output=True, text=True)
-                        if _r.returncode == 0:
-                            st.success("✅ 已推送！Streamlit Cloud 約 30 秒後更新")
-                        else:
-                            st.error(f"推送失敗：{_r.stderr.strip()}")
-                    else:
-                        st.info("ℹ️ Excel 沒有變化，毋需同步")
-
         st.divider()
         st.markdown("#### 🔍 篩選")
         status_options = [
@@ -400,6 +340,66 @@ def main():
     phone_col     = df.columns[COL_PHONE      - 1]
     # COL_TAX may not exist yet in older Excel files — guard with index check
     tax_col       = df.columns[COL_TAX - 1] if len(df.columns) >= COL_TAX else None
+
+    # ── Sidebar: cancel + sync（需要 df，放喺載入後）────────────────────────────
+    if not _IS_CLOUD:
+        with st.sidebar:
+            st.divider()
+            st.markdown("#### ❌ 取消訂單")
+            cancel_opts = [
+                f"{_val(r[date_col])}  {_to_hant(_val(r[name_col]))}  {_val(r[waybill_col])}"
+                for _, r in df.iterrows()
+                if _val(r[waybill_col]) and "已取消" not in _val(r[status_col])
+                   and "已簽收" not in _val(r[status_col])
+            ]
+            if cancel_opts:
+                cancel_pick = st.selectbox(
+                    "選擇要取消的訂單", ["— 請選擇 —"] + cancel_opts,
+                    key="cancel_sel", label_visibility="collapsed")
+                if cancel_pick != "— 請選擇 —":
+                    if st.button("🗑️ 確認取消此訂單", use_container_width=True,
+                                 type="secondary", key="cancel_btn"):
+                        _wb_cancel = cancel_pick.split("  ")[-1].strip()
+                        try:
+                            _wb2 = openpyxl.load_workbook(EXCEL_PATH)
+                            _ws2 = _wb2[EXCEL_SHEET]
+                            for _row in _ws2.iter_rows(min_row=2):
+                                if str(_row[COL_WAYBILL - 1].value or "").strip() == _wb_cancel:
+                                    _row[COL_STATUS - 1].value = "已取消"
+                                    break
+                            _wb2.save(EXCEL_PATH)
+                            st.success(f"✅ {_wb_cancel} 已標記為取消")
+                            import subprocess as _sp2
+                            _repo2 = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                            _sp2.run(["git", "add", "data/tracking.xlsx"], cwd=_repo2)
+                            _sp2.run(["git", "commit", "-m", f"cancel: {_wb_cancel}"],
+                                     cwd=_repo2, capture_output=True)
+                            _sp2.run(["git", "push"], cwd=_repo2, capture_output=True)
+                            st.cache_data.clear()
+                            st.rerun()
+                        except Exception as _ce:
+                            st.error(f"取消失敗：{_ce}")
+
+            st.divider()
+            if st.button("☁️ 立即同步到雲端", use_container_width=True):
+                with st.spinner("正在推送到 GitHub…"):
+                    _repo = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+                    import subprocess as _sp
+                    from datetime import datetime as _dt
+                    _now = _dt.now().strftime("%Y-%m-%d %H:%M")
+                    _st = _sp.run(["git", "status", "--porcelain", "data/tracking.xlsx"],
+                                  cwd=_repo, capture_output=True, text=True)
+                    if _st.stdout.strip():
+                        _sp.run(["git", "add", "data/tracking.xlsx"], cwd=_repo)
+                        _sp.run(["git", "commit", "-m", f"manual sync: {_now}"],
+                                cwd=_repo, capture_output=True)
+                        _r = _sp.run(["git", "push"], cwd=_repo, capture_output=True, text=True)
+                        if _r.returncode == 0:
+                            st.success("✅ 已推送！Streamlit Cloud 約 30 秒後更新")
+                        else:
+                            st.error(f"推送失敗：{_r.stderr.strip()}")
+                    else:
+                        st.info("ℹ️ Excel 沒有變化，毋需同步")
 
     s = df[status_col].astype(str)
     total     = len(df)
