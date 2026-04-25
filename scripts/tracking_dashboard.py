@@ -150,6 +150,34 @@ def _push_to_github() -> bool:
         return False
 
 
+@st.cache_data(ttl=3600)
+def _get_storage_mb() -> float:
+    """Return repo size in MB. Uses GitHub API on cloud, local folder size locally."""
+    try:
+        if _IS_CLOUD:
+            import requests as _req
+            token = st.secrets.get("GITHUB_TOKEN", "")
+            repo  = st.secrets.get("GITHUB_REPO", "elizapoon084/sf-tracking")
+            if not token:
+                return -1.0
+            headers = {"Authorization": f"token {token}"}
+            r = _req.get(f"https://api.github.com/repos/{repo}",
+                         headers=headers, timeout=8)
+            if r.status_code == 200:
+                return r.json().get("size", 0) / 1024.0  # KB → MB
+        else:
+            orders_dir = os.path.join(_REPO_ROOT, "data", "orders")
+            total = sum(
+                os.path.getsize(os.path.join(root, f))
+                for root, _, files in os.walk(orders_dir)
+                for f in files
+            )
+            return total / (1024 * 1024)
+    except Exception:
+        pass
+    return -1.0
+
+
 def _save_tax_values(changed_df: pd.DataFrame) -> int:
     """Write updated tax values back to tracking.xlsx. Returns count saved."""
     try:
@@ -372,6 +400,20 @@ def main():
         st.divider()
         st.caption("💡 點擊運單號可在順豐網站查件")
         st.caption("💡 「全部（顯示活躍）」隱藏已取消訂單")
+
+        # ── 儲存空間指示器 ─────────────────────────────────────────────────
+        st.divider()
+        _size_mb = _get_storage_mb()
+        if _size_mb >= 0:
+            _LIMIT_MB = 1000.0        # GitHub 1 GB soft limit
+            _label    = "☁️ GitHub 容量" if _IS_CLOUD else "📁 訂單檔案大小"
+            _pct      = _size_mb / _LIMIT_MB
+            st.caption(f"{_label}：{_size_mb:.1f} MB / {int(_LIMIT_MB)} MB")
+            st.progress(min(_pct, 1.0))
+            if _pct >= 0.8:
+                st.error("🚨 儲存空間已超過 80%！請清理舊檔案！")
+            elif _pct >= 0.6:
+                st.warning(f"⚠️ 儲存空間已用 {_pct:.0%}，留意容量")
 
     # ── Load data ─────────────────────────────────────────────────────────────
     df = load_orders()
