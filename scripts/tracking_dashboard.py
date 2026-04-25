@@ -49,6 +49,7 @@ _CLOUD_EXCEL = os.path.join(_SCRIPT_DIR, "..", "data", "tracking.xlsx")
 EXCEL_PATH = _CLOUD_EXCEL if _IS_CLOUD else _LOCAL_EXCEL_PATH
 
 SF_PUBLIC_TRACK = "https://www.sf-express.com/cn/sc/dynamic_function/waybill/#search/bill-number/{}"
+_GH_RAW = "https://raw.githubusercontent.com/elizapoon084/sf-tracking/main/"
 
 
 def _resolve_path(rel_or_abs: str) -> str:
@@ -58,6 +59,36 @@ def _resolve_path(rel_or_abs: str) -> str:
     if os.path.isabs(rel_or_abs):
         return rel_or_abs
     return os.path.join(_REPO_ROOT, rel_or_abs)
+
+
+def _file_links_html(pdf_rel: str) -> str:
+    """Return HTML download links for the 3 order files (小票/運單/清單)."""
+    from urllib.parse import quote as _q
+    if not pdf_rel:
+        return '<span style="color:#ddd;font-size:11px;">—</span>'
+    order_dir_rel = os.path.dirname(pdf_rel).replace("\\", "/")
+    order_dir_abs = _resolve_path(pdf_rel)
+    order_dir_abs = os.path.dirname(order_dir_abs)
+    parts = []
+    if os.path.isdir(order_dir_abs):
+        for fname in sorted(os.listdir(order_dir_abs)):
+            if "運單" in fname:
+                icon, label, color = "📦", "運單", "#2980b9"
+            elif fname.endswith((".doc", ".docx")):
+                icon, label, color = "📝", "清單", "#8e44ad"
+            elif fname.endswith((".pdf", ".png")):
+                icon, label, color = "🧾", "小票", "#27ae60"
+            else:
+                continue
+            url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
+            parts.append(
+                f'<a href="{url}" target="_blank" '
+                f'style="font-size:11px;color:{color};text-decoration:none;'
+                f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
+                f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
+                f'white-space:nowrap;">{icon} {label}</a>'
+            )
+    return "<br>".join(parts) if parts else '<span style="color:#ddd;font-size:11px;">—</span>'
 
 
 # ── 稅金寫回 Excel ─────────────────────────────────────────────────────────────
@@ -340,6 +371,7 @@ def main():
     phone_col     = df.columns[COL_PHONE      - 1]
     # COL_TAX may not exist yet in older Excel files — guard with index check
     tax_col       = df.columns[COL_TAX - 1] if len(df.columns) >= COL_TAX else None
+    pdf_col       = df.columns[COL_PDF_PATH - 1] if len(df.columns) >= COL_PDF_PATH else None
 
     # ── Sidebar: cancel + sync（需要 df，放喺載入後）────────────────────────────
     if not _IS_CLOUD:
@@ -477,6 +509,7 @@ def main():
         freight_v   = _val(row[freight_col])
         notes_v     = _val(row[notes_col])
         tax_v       = _val(row[tax_col]) if tax_col is not None else ""
+        pdf_rel_v   = _val(row[pdf_col]) if pdf_col is not None else ""
 
         is_anom     = any(kw in status for kw in ANOMALY_KEYWORDS)
         is_cancel   = "已取消" in status
@@ -501,7 +534,7 @@ def main():
 
         # ── 貨品 cell（點擊展開詳情）─────────────────────────────────────────
         if items_v:
-            preview = items_v[:45] + ("…" if len(items_v) > 45 else "")
+            preview = items_v[:22] + ("…" if len(items_v) > 22 else "")
             detail_lines = "".join(
                 f'<div style="padding:2px 0;border-bottom:1px solid #eee;">• {_esc(it.strip())}</div>'
                 for it in items_v.split(" / ") if it.strip()
@@ -591,11 +624,12 @@ def main():
         else:
             receipt_cell = '<span style="color:#ddd;font-size:11px;">—</span>'
 
-        tax_html = (
+        tax_html   = (
             f'<span style="color:#e67e22;font-weight:600;">HKD {_esc(tax_v)}</span>'
             if tax_v else
             '<span style="color:#ddd;font-size:11px;">—</span>'
         )
+        files_html = _file_links_html(pdf_rel_v)
 
         lkey = f"#{i+1}  {_val(row[date_col])}  {_val(row[name_col])}  {_val(row[waybill_col])}"
         logistics_keys.append((lkey, row))
@@ -612,6 +646,7 @@ def main():
           <td style="padding:8px 10px;text-align:center;">{status_cell}</td>
           <td style="padding:8px 10px;font-size:12px;line-height:1.6;">{receipt_cell}</td>
           <td style="padding:8px 10px;text-align:right;">{tax_html}</td>
+          <td style="padding:8px 10px;text-align:center;">{files_html}</td>
         </tr>""")
 
     table_html = f"""
@@ -630,6 +665,7 @@ def main():
       <th style="padding:10px 10px;text-align:center;font-weight:600;">狀態</th>
       <th style="padding:10px 10px;text-align:left;font-weight:600;">電子存根</th>
       <th style="padding:10px 10px;text-align:right;font-weight:600;">稅金</th>
+      <th style="padding:10px 10px;text-align:center;font-weight:600;">📥 檔案</th>
     </tr>
     </thead>
     <tbody>{''.join(rows_html)}</tbody>
@@ -878,7 +914,6 @@ def main():
     st.markdown("### 🗂️ 訂單檔案下載")
     st.caption("小票 PDF、順豐運單 PDF、POS Word 清單 — 同事可直接下載列印")
 
-    pdf_col  = df.columns[COL_PDF_PATH - 1]
     has_pdf  = df[pdf_col].apply(
         lambda v: bool(_val(v)) and os.path.exists(_resolve_path(_val(v))))
     pdf_rows = df[has_pdf]
