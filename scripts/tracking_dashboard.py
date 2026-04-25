@@ -193,6 +193,16 @@ def load_name_to_sku() -> dict:
         return {}
 
 
+try:
+    import zhconv as _zhconv
+    def _to_hant(s: str) -> str:
+        """Convert Simplified → Traditional for name comparison/grouping."""
+        return _zhconv.convert(s, "zh-hant") if s else s
+except ImportError:
+    def _to_hant(s: str) -> str:
+        return s
+
+
 def _parse_item(item_str: str) -> tuple:
     """Parse '[SKU] Name×qty' or 'Name×qty' → (sku, name, qty).
     Supports both × and x as quantity separator."""
@@ -368,7 +378,7 @@ def main():
     for i, (_, row) in enumerate(display.iterrows()):
         wb_val      = _val(row[waybill_col])
         status      = _val(row[status_col]) or "—"
-        name_v      = _val(row[name_col])
+        name_v      = _to_hant(_val(row[name_col]))
         date_v      = _val(row[date_col])
         items_v     = _val(row[items_col])
         qty_v       = _val(row[qty_col])
@@ -587,15 +597,18 @@ def main():
     if signed_df.empty:
         st.info("暫無已簽收訂單")
     else:
+        # Normalise names: Simplified → Traditional for grouping
+        signed_df["_name_hant"] = signed_df[name_col].apply(
+            lambda v: _to_hant(_val(v)))
         customers = ["全部客人"] + sorted(
-            [x for x in signed_df[name_col].dropna().unique() if x])
+            [x for x in signed_df["_name_hant"].dropna().unique() if x])
         sel_cust = st.selectbox("篩選客人", customers, key="batch_cust")
 
         batch_pool = signed_df if sel_cust == "全部客人" else \
-            signed_df[signed_df[name_col].astype(str) == sel_cust]
+            signed_df[signed_df["_name_hant"] == sel_cust]
 
         order_labels = [
-            f"{_val(r[date_col])}  {_val(r[name_col])}  {_val(r[waybill_col])}"
+            f"{_val(r[date_col])}  {_to_hant(_val(r[name_col]))}  {_val(r[waybill_col])}"
             for _, r in batch_pool.iterrows()
         ]
 
@@ -610,7 +623,7 @@ def main():
                 included_rows = []
                 for label in sel_orders:
                     for _, row in batch_pool.iterrows():
-                        if f"{_val(row[date_col])}  {_val(row[name_col])}  {_val(row[waybill_col])}" == label:
+                        if f"{_val(row[date_col])}  {_to_hant(_val(row[name_col]))}  {_val(row[waybill_col])}" == label:
                             included_rows.append(row)
                             for item in _val(row[items_col]).split(" / "):
                                 item = item.strip()
