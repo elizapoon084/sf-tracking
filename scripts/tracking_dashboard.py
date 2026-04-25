@@ -940,29 +940,64 @@ def main():
                         key=f"lqty_{sel_lkey}_{idx2}",
                         label_visibility="collapsed")
                 final = qty2 if chk else 0
-                all_items_record.append({"name": nm, "orig": orig, "final": final})
+                all_items_record.append({"name": nm, "orig": orig, "final": final, "extra": False})
                 if chk and qty2 > 0:
                     selected_items.append({"name": nm, "qty": qty2})
 
+            # ── 額外加入貨品（原訂以外）─────────────────────────────────────
+            st.markdown("**➕ 額外加入貨品（補加原訂以外的產品）：**")
+            _ekey = f"extras_{sel_lkey}"
+            if _ekey not in st.session_state:
+                st.session_state[_ekey] = []
+
+            _ca, _cb, _cc = st.columns([0.55, 0.18, 0.27])
+            with _ca:
+                _enm  = st.text_input("", placeholder="輸入產品名稱",
+                                      key=f"enm_{sel_lkey}", label_visibility="collapsed")
+            with _cb:
+                _eqty = st.number_input("", min_value=1, value=1, step=1,
+                                        key=f"eqty_{sel_lkey}", label_visibility="collapsed")
+            with _cc:
+                if st.button("➕ 加入清單", key=f"eadd_{sel_lkey}") and _enm.strip():
+                    st.session_state[_ekey].append({"name": _enm.strip(), "qty": int(_eqty)})
+                    st.rerun()
+
+            for _ei, _ex in enumerate(st.session_state.get(_ekey, [])):
+                _ra, _rb = st.columns([0.88, 0.12])
+                with _ra:
+                    st.markdown(f"　➕ **{_ex['name']}** × {_ex['qty']}")
+                with _rb:
+                    if st.button("🗑️", key=f"erm_{sel_lkey}_{_ei}"):
+                        st.session_state[_ekey].pop(_ei)
+                        st.rerun()
+
+            # Append extras to records
+            for _ex in st.session_state.get(_ekey, []):
+                all_items_record.append({"name": _ex["name"], "orig": 0,
+                                         "final": _ex["qty"], "extra": True})
+                selected_items.append({"name": _ex["name"], "qty": _ex["qty"]})
+
             # ── 更改確認預覽（永遠顯示）──────────────────────────────────────
             if all_items_record:
-                has_changes = any(r["orig"] != r["final"] for r in all_items_record)
+                has_changes = any(
+                    r["orig"] != r["final"] or r["extra"] for r in all_items_record)
                 label = "**📋 更改確認 — 請核對後再下載：**" if has_changes else "**📋 貨品確認：**"
                 st.markdown(label)
                 prev_rows = []
                 for r in all_items_record:
-                    diff = r["final"] - r["orig"]
-                    if r["final"] == 0:
+                    if r["extra"]:
+                        chg = "➕ 新增"
+                    elif r["final"] == 0:
                         chg = "❌ 已剔除"
-                    elif diff < 0:
-                        chg = f"📉 減少 {abs(diff)} 件"
-                    elif diff > 0:
-                        chg = f"📈 增加 {diff} 件"
+                    elif r["final"] < r["orig"]:
+                        chg = f"📉 減少 {r['orig']-r['final']} 件"
+                    elif r["final"] > r["orig"]:
+                        chg = f"📈 增加 {r['final']-r['orig']} 件"
                     else:
                         chg = "✅ 不變"
                     prev_rows.append({
                         "貨品名稱": r["name"],
-                        "原訂數量": r["orig"],
+                        "原訂數量": r["orig"] if not r["extra"] else "—",
                         "最終數量": r["final"],
                         "狀態":     chg,
                     })
@@ -971,7 +1006,7 @@ def main():
                     hide_index=True, use_container_width=True,
                     column_config={
                         "貨品名稱": st.column_config.TextColumn("貨品名稱"),
-                        "原訂數量": st.column_config.NumberColumn("原訂", width="small"),
+                        "原訂數量": st.column_config.TextColumn("原訂", width="small"),
                         "最終數量": st.column_config.NumberColumn("最終", width="small"),
                         "狀態":     st.column_config.TextColumn("狀態",  width="medium"),
                     })
@@ -988,10 +1023,12 @@ def main():
                 ws2.append([])
                 ws2.append(["貨品名稱", "原訂數量", "最終數量", "備註"])
                 for r in all_items_record:
-                    note = ("" if r["orig"] == r["final"] else
+                    orig_disp = "" if r["extra"] else r["orig"]
+                    note = ("新增貨品" if r["extra"] else
+                            "" if r["orig"] == r["final"] else
                             "已剔除" if r["final"] == 0 else
                             f"由 {r['orig']} 調整為 {r['final']}")
-                    ws2.append([r["name"], r["orig"], r["final"], note])
+                    ws2.append([r["name"], orig_disp, r["final"], note])
                 ws2.append([])
                 ws2.append(["合計件數", "", sum(it["qty"] for it in selected_items), ""])
                 wb2.save(buf2)
