@@ -286,6 +286,29 @@ def main():
                 st.cache_data.clear()
                 st.rerun()
 
+            if st.button("☁️ 立即同步到雲端", use_container_width=True):
+                with st.spinner("正在推送到 GitHub…"):
+                    _repo = os.path.abspath(
+                        os.path.join(os.path.dirname(__file__), ".."))
+                    _excel_rel = os.path.join("data", "tracking.xlsx")
+                    import subprocess as _sp
+                    from datetime import datetime as _dt
+                    _now = _dt.now().strftime("%Y-%m-%d %H:%M")
+                    _st = _sp.run(["git", "status", "--porcelain", _excel_rel],
+                                  cwd=_repo, capture_output=True, text=True)
+                    if _st.stdout.strip():
+                        _sp.run(["git", "add", _excel_rel], cwd=_repo)
+                        _sp.run(["git", "commit", "-m", f"manual sync: {_now}"],
+                                cwd=_repo, capture_output=True)
+                        _r = _sp.run(["git", "push"], cwd=_repo,
+                                     capture_output=True, text=True)
+                        if _r.returncode == 0:
+                            st.success("✅ 已推送！Streamlit Cloud 約 30 秒後更新")
+                        else:
+                            st.error(f"推送失敗：{_r.stderr.strip()}")
+                    else:
+                        st.info("ℹ️ Excel 沒有變化，毋需同步")
+
         st.divider()
         st.markdown("#### 🔍 篩選")
         status_options = [
