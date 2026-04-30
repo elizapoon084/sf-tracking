@@ -109,6 +109,28 @@ def _file_links_html(pdf_rel: str) -> str:
                     f'white-space:nowrap;">📦 運單</a>'
                 )
                 continue
+            # ── 收貨明細 PDF ───────────────────────────────────────────────────
+            if fname.endswith(".pdf") and "收貨明細" in fname:
+                url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
+                parts.append(
+                    f'<a href="{url}" target="_blank" '
+                    f'style="font-size:11px;color:#16a085;text-decoration:none;'
+                    f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
+                    f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
+                    f'white-space:nowrap;">📋 收貨明細</a>'
+                )
+                continue
+            # ── 清關 PDF ───────────────────────────────────────────────────────
+            if fname.endswith(".pdf") and "清關" in fname:
+                url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
+                parts.append(
+                    f'<a href="{url}" target="_blank" '
+                    f'style="font-size:11px;color:#8e44ad;text-decoration:none;'
+                    f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
+                    f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
+                    f'white-space:nowrap;">🛃 清關</a>'
+                )
+                continue
             # ── POS receipt (小票): first plain PDF/PNG without SF number ─────
             if fname.endswith((".pdf", ".png")) and not ticket_added:
                 url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
@@ -1132,7 +1154,14 @@ def main():
                     fpath = os.path.join(order_dir, fname)
                     if fname.endswith(".pdf"):
                         mime = "application/pdf"
-                        icon = "📄 小票" if "運單" not in fname else "📦 運單"
+                        if "運單" in fname or _SF_NUM_RE.search(fname):
+                            icon = "📦 運單"
+                        elif "收貨明細" in fname:
+                            icon = "📋 收貨明細"
+                        elif "清關" in fname:
+                            icon = "🛃 清關"
+                        else:
+                            icon = "📄 小票"
                     elif fname.endswith((".doc", ".docx")):
                         mime = "application/msword"
                         icon = "📝 POS清單"
