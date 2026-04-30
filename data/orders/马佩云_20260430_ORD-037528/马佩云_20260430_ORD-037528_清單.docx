@@ -1,0 +1,25 @@
+﻿<html xmlns:o='urn:schemas-microsoft-com:office:office' xmlns:w='urn:schemas-microsoft-com:office:word'><head><meta charset='utf-8'></head><body>
+      <table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;">
+        <tr>
+          <th style="padding:6px 14px;border:1px solid #888;background:#f0f0f0;">型號</th>
+          <th style="padding:6px 14px;border:1px solid #888;background:#f0f0f0;">產品名</th>
+          <th style="padding:6px 14px;border:1px solid #888;background:#f0f0f0;">數量</th>
+        </tr>
+        
+      <tr>
+        <td style="padding:6px 14px;border:1px solid #bbb;">1084085</td>
+        <td style="padding:6px 14px;border:1px solid #bbb;">Activitae 長青護心高鈣脫脂奶粉</td>
+        <td style="padding:6px 14px;border:1px solid #bbb;text-align:center;">2</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 14px;border:1px solid #bbb;">1084086</td>
+        <td style="padding:6px 14px;border:1px solid #bbb;">Activitae 視力寶加強版</td>
+        <td style="padding:6px 14px;border:1px solid #bbb;text-align:center;">3</td>
+      </tr>
+      <tr>
+        <td style="padding:6px 14px;border:1px solid #bbb;">1084065</td>
+        <td style="padding:6px 14px;border:1px solid #bbb;">Activitae INO BELLA 3女士寶第三代升級版</td>
+        <td style="padding:6px 14px;border:1px solid #bbb;text-align:center;">3</td>
+      </tr>
+      </table>
+    </body></html>
