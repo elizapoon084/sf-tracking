@@ -428,12 +428,16 @@ def main():
         st.caption(f"Excel 路徑：{EXCEL_PATH}")
         return
 
-    # 最新日期排最頂（按日期降序，日期相同保留原始倒序）
-    date_col_raw = df.columns[COL_DATE - 1]
+    # 最新排最頂：先按日期降序，同日期內按順豐號降序（SF號越大越新）
+    date_col_raw    = df.columns[COL_DATE    - 1]
+    waybill_col_raw = df.columns[COL_WAYBILL - 1]
     df["_sort_date"] = pd.to_datetime(df[date_col_raw].astype(str).str[:8], format="%Y%m%d", errors="coerce")
-    df = df.iloc[::-1].reset_index(drop=True)  # 先倒序（同日期內最新在頂）
-    df = df.sort_values("_sort_date", ascending=False, kind="stable", na_position="last")
-    df = df.drop(columns=["_sort_date"]).reset_index(drop=True)
+    df["_sort_sf"]   = pd.to_numeric(
+        df[waybill_col_raw].astype(str).str.extract(r"(\d+)", expand=False),
+        errors="coerce")
+    df = df.sort_values(["_sort_date", "_sort_sf"], ascending=[False, False],
+                        kind="stable", na_position="last")
+    df = df.drop(columns=["_sort_date", "_sort_sf"]).reset_index(drop=True)
 
     status_col    = df.columns[COL_STATUS     - 1]
     waybill_col   = df.columns[COL_WAYBILL    - 1]
