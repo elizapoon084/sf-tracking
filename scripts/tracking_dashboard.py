@@ -67,82 +67,64 @@ _SF_NUM_RE = _re.compile(r'SF\d{15,}', _re.IGNORECASE)
 
 
 def _file_links_html(pdf_rel: str) -> str:
-    """Return HTML download links for the 3 order files (小票/運單/清單)."""
+    """Return a 2-row HTML grid of download links: 小票+運單 / 明細+清關."""
     import base64 as _b64
     from urllib.parse import quote as _q
+
+    _PILL = (
+        'display:inline-block;padding:2px 7px;border-radius:4px;border:1px solid {border};'
+        'background:{bg};color:{fg};font-size:11px;text-decoration:none;white-space:nowrap;'
+        'margin:1px 2px;font-weight:600;'
+    )
+    _STYLES = {
+        "小票":  dict(bg="#e8f5e9", fg="#27ae60", border="#a5d6a7"),
+        "運單":  dict(bg="#e3f2fd", fg="#1565c0", border="#90caf9"),
+        "明細":  dict(bg="#e0f2f1", fg="#00695c", border="#80cbc4"),
+        "清關":  dict(bg="#f3e5f5", fg="#6a1b9a", border="#ce93d8"),
+    }
+
     if not pdf_rel:
         return '<span style="color:#ddd;font-size:11px;">—</span>'
+
     order_dir_rel = os.path.dirname(pdf_rel).replace("\\", "/")
     order_dir_abs = os.path.dirname(_resolve_path(pdf_rel))
-    parts = []
-    ticket_added = False   # prevent duplicate 小票 badges
+
+    slots = {"小票": None, "運單": None, "明細": None, "清關": None}
+
     if os.path.isdir(order_dir_abs):
         for fname in sorted(os.listdir(order_dir_abs)):
             fpath = os.path.join(order_dir_abs, fname)
-            # ── Word 清單: use base64 data URI so download attribute works ────
+            if not fname.endswith((".pdf", ".png", ".doc", ".docx")):
+                continue
+            url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
+
             if fname.endswith((".doc", ".docx")):
-                try:
-                    with open(fpath, "rb") as _f:
-                        _enc = _b64.b64encode(_f.read()).decode()
-                    _mime = ("application/vnd.openxmlformats-officedocument"
-                             ".wordprocessingml.document"
-                             if fname.endswith(".docx") else "application/msword")
-                    parts.append(
-                        f'<a href="data:{_mime};base64,{_enc}" download="{fname}" '
-                        f'style="font-size:11px;color:#8e44ad;text-decoration:none;'
-                        f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
-                        f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
-                        f'white-space:nowrap;">📝 清單</a>'
-                    )
-                except Exception:
-                    parts.append('<span style="font-size:11px;color:#8e44ad;">📝 清單</span>')
+                continue  # Word清單 not shown in table cell
+            if "運單" in fname or _SF_NUM_RE.search(fname):
+                key = "運單"
+            elif "收貨明細" in fname:
+                key = "明細"
+            elif "清關" in fname:
+                key = "清關"
+            elif slots["小票"] is None:
+                key = "小票"
+            else:
                 continue
-            # ── SF waybill PDF: "運單" in name OR SF-number pattern in name ───
-            if fname.endswith((".pdf", ".png")) and (
-                    "運單" in fname or _SF_NUM_RE.search(fname)):
-                url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
-                parts.append(
-                    f'<a href="{url}" target="_blank" '
-                    f'style="font-size:11px;color:#2980b9;text-decoration:none;'
-                    f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
-                    f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
-                    f'white-space:nowrap;">📦 運單</a>'
-                )
-                continue
-            # ── 收貨明細 PDF ───────────────────────────────────────────────────
-            if fname.endswith(".pdf") and "收貨明細" in fname:
-                url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
-                parts.append(
-                    f'<a href="{url}" target="_blank" '
-                    f'style="font-size:11px;color:#16a085;text-decoration:none;'
-                    f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
-                    f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
-                    f'white-space:nowrap;">📋 收貨明細</a>'
-                )
-                continue
-            # ── 清關 PDF ───────────────────────────────────────────────────────
-            if fname.endswith(".pdf") and "清關" in fname:
-                url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
-                parts.append(
-                    f'<a href="{url}" target="_blank" '
-                    f'style="font-size:11px;color:#8e44ad;text-decoration:none;'
-                    f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
-                    f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
-                    f'white-space:nowrap;">🛃 清關</a>'
-                )
-                continue
-            # ── POS receipt (小票): first plain PDF/PNG without SF number ─────
-            if fname.endswith((".pdf", ".png")) and not ticket_added:
-                url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
-                parts.append(
-                    f'<a href="{url}" target="_blank" '
-                    f'style="font-size:11px;color:#27ae60;text-decoration:none;'
-                    f'display:inline-block;margin:2px 1px;background:#f8f9fa;'
-                    f'padding:2px 7px;border-radius:4px;border:1px solid #dee2e6;'
-                    f'white-space:nowrap;">🧾 小票</a>'
-                )
-                ticket_added = True
-    return "<br>".join(parts) if parts else '<span style="color:#ddd;font-size:11px;">—</span>'
+            s = _STYLES[key]
+            slots[key] = (
+                f'<a href="{url}" target="_blank" style="{_PILL.format(**s)}">'
+                f'{"🧾" if key=="小票" else "📦" if key=="運單" else "📋" if key=="明細" else "🛃"}'
+                f' {key}</a>'
+            )
+
+    row1 = (slots["小票"] or "") + (slots["運單"] or "")
+    row2 = (slots["明細"] or "") + (slots["清關"] or "")
+    if not row1 and not row2:
+        return '<span style="color:#ddd;font-size:11px;">—</span>'
+    return (
+        f'<div style="display:flex;flex-direction:column;gap:2px;min-width:110px;">'
+        f'<div>{row1}</div><div>{row2}</div></div>'
+    )
 
 
 # ── 稅金寫回 Excel ─────────────────────────────────────────────────────────────
@@ -571,8 +553,9 @@ def main():
     st.divider()
 
     # ── Apply filters ─────────────────────────────────────────────────────────
-    # Always remove 已取消 — cancelled orders never shown in table
-    display = df[~df[status_col].astype(str).str.contains("已取消", na=False)].copy()
+    # Hide cancelled orders (both manually marked and SF-returned cancellations)
+    _CANCEL_RE = "取消"
+    display = df[~df[status_col].astype(str).str.contains(_CANCEL_RE, na=False)].copy()
 
     if sel_status not in ("全部（顯示活躍）", "全部"):
         display = display[display[status_col].astype(str).str.contains(sel_status, na=False)]
@@ -769,6 +752,84 @@ def main():
 
     st.markdown(table_html, unsafe_allow_html=True)
     st.caption("📝 Word清單請在下方「訂單檔案下載」區域下載（直接點擊表格鏈結只適用於 PDF）")
+
+    # ── 訂單檔案下載 ─────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### 🗂️ 訂單檔案下載")
+    st.caption("小票、運單、收貨明細、清關 — 4個PDF一次下載")
+
+    if pdf_col is not None:
+        _not_cancelled = ~df[status_col].astype(str).str.contains("取消", na=False)
+        has_pdf  = df[pdf_col].apply(
+            lambda v: bool(_val(v)) and os.path.exists(_resolve_path(_val(v))))
+        pdf_rows = df[has_pdf & _not_cancelled]
+    else:
+        pdf_rows = pd.DataFrame()
+
+    if pdf_rows.empty:
+        st.info("暫無檔案（完成寄件後自動出現）")
+    else:
+        options = [
+            f"{_val(r[date_col])}  {_to_hant(_val(r[name_col]))}  {_val(r[waybill_col])}"
+            for _, r in pdf_rows.iterrows()
+        ]
+        selected = st.selectbox("選擇訂單", options[::-1], key="file_sel")
+        if selected:
+            sel_row   = pdf_rows.iloc[len(options) - 1 - options[::-1].index(selected)]
+            pdf_rel   = _val(sel_row[pdf_col])
+            pdf_abs   = _resolve_path(pdf_rel)
+            order_dir = os.path.dirname(pdf_abs)
+
+            if os.path.isdir(order_dir):
+                # Categorise files into 4 slots
+                _slots = {"小票": [], "運單": [], "收貨明細": [], "清關": [], "其他": []}
+                for fname in sorted(os.listdir(order_dir)):
+                    if "運單" in fname or _SF_NUM_RE.search(fname):
+                        _slots["運單"].append(fname)
+                    elif "收貨明細" in fname:
+                        _slots["收貨明細"].append(fname)
+                    elif "清關" in fname:
+                        _slots["清關"].append(fname)
+                    elif fname.endswith((".doc", ".docx")):
+                        _slots["其他"].append(fname)
+                    elif fname.endswith((".pdf", ".png")):
+                        _slots["小票"].append(fname)
+
+                _ICONS = {"小票": "🧾", "運單": "📦", "收貨明細": "📋", "清關": "🛃", "其他": "📎"}
+                _MIMES = {".pdf": "application/pdf", ".png": "image/png",
+                          ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                          ".doc":  "application/msword"}
+
+                # 4-column download buttons
+                dl_cols = st.columns(4)
+                col_map = {"小票": 0, "運單": 1, "收貨明細": 2, "清關": 3}
+                for cat, fnames in _slots.items():
+                    if not fnames:
+                        continue
+                    fname = fnames[0]
+                    fpath = os.path.join(order_dir, fname)
+                    ext   = os.path.splitext(fname)[1].lower()
+                    mime  = _MIMES.get(ext, "application/octet-stream")
+                    cidx  = col_map.get(cat, 3)
+                    with open(fpath, "rb") as f:
+                        dl_cols[cidx].download_button(
+                            label=f"{_ICONS.get(cat,'📎')} {cat}",
+                            data=f.read(), file_name=fname, mime=mime,
+                            use_container_width=True,
+                            key=f"dl_{cat}_{fname}")
+
+            # Inline preview of 小票
+            if os.path.exists(pdf_abs) and pdf_abs.endswith(".pdf"):
+                with open(pdf_abs, "rb") as f:
+                    b64 = base64.b64encode(f.read()).decode()
+                st.markdown(
+                    f'<iframe src="data:application/pdf;base64,{b64}" '
+                    f'width="100%" height="500" type="application/pdf"></iframe>',
+                    unsafe_allow_html=True)
+            elif os.path.exists(pdf_abs) and pdf_abs.endswith(".png"):
+                st.image(pdf_abs)
+            else:
+                st.caption("（預覽僅限本地，雲端請用上方下載按鈕）")
 
     # ── 訂單貨品詳情 ──────────────────────────────────────────────────────────
     st.divider()
@@ -1070,7 +1131,7 @@ def main():
         st_ = str(row[status_col]  or "").strip()
         nm  = _to_hant(_val(row[name_col]))
         if wb and wb not in ("None", "") and st_ not in ("None", "") \
-                and "已簽收" not in st_ and "已取消" not in st_:
+                and "已簽收" not in st_ and "取消" not in st_:
             active.append((nm, wb, st_))
 
     if active:
@@ -1122,71 +1183,6 @@ def main():
                              use_container_width=True):
                     st.session_state["dismissed_wbs"].add(wb)
                     st.rerun()
-
-    # ── 小票 & 運單 & Word 下載 ────────────────────────────────────────────────
-    st.divider()
-    st.markdown("### 🗂️ 訂單檔案下載")
-    st.caption("小票 PDF、順豐運單 PDF、POS Word 清單 — 同事可直接下載列印")
-
-    has_pdf  = df[pdf_col].apply(
-        lambda v: bool(_val(v)) and os.path.exists(_resolve_path(_val(v))))
-    pdf_rows = df[has_pdf]
-
-    if pdf_rows.empty:
-        st.info("暫無檔案（完成寄件後自動出現）")
-    else:
-        options = [
-            f"{_val(r[date_col])}  {_to_hant(_val(r[name_col]))}  {_val(r[waybill_col])}"
-            for _, r in pdf_rows.iterrows()
-        ]
-        selected = st.selectbox("選擇訂單", options[::-1], key="file_sel")
-        if selected:
-            sel_row   = pdf_rows.iloc[len(options) - 1 - options[::-1].index(selected)]
-            pdf_rel   = _val(sel_row[pdf_col])
-            pdf_abs   = _resolve_path(pdf_rel)
-            order_dir = os.path.dirname(pdf_abs)
-
-            # List all files in the order folder
-            if os.path.isdir(order_dir):
-                files = sorted(os.listdir(order_dir))
-                col_files = st.columns(min(len(files), 3))
-                for idx, fname in enumerate(files):
-                    fpath = os.path.join(order_dir, fname)
-                    if fname.endswith(".pdf"):
-                        mime = "application/pdf"
-                        if "運單" in fname or _SF_NUM_RE.search(fname):
-                            icon = "📦 運單"
-                        elif "收貨明細" in fname:
-                            icon = "📋 收貨明細"
-                        elif "清關" in fname:
-                            icon = "🛃 清關"
-                        else:
-                            icon = "📄 小票"
-                    elif fname.endswith((".doc", ".docx")):
-                        mime = "application/msword"
-                        icon = "📝 POS清單"
-                    else:
-                        mime = "application/octet-stream"
-                        icon = "📎 " + fname
-                    with open(fpath, "rb") as f:
-                        col_files[idx % 3].download_button(
-                            label=icon, data=f.read(),
-                            file_name=fname, mime=mime,
-                            key=f"dl_{fname}_{idx}")
-
-            # PDF inline preview (小票 only, local mode works best)
-            if os.path.exists(pdf_abs) and pdf_abs.endswith(".pdf"):
-                with open(pdf_abs, "rb") as f:
-                    b64 = base64.b64encode(f.read()).decode()
-                st.markdown(
-                    f'<iframe src="data:application/pdf;base64,{b64}" '
-                    f'width="100%" height="600" type="application/pdf">'
-                    f'</iframe>',
-                    unsafe_allow_html=True)
-            elif os.path.exists(pdf_abs) and pdf_abs.endswith(".png"):
-                st.image(pdf_abs)
-            else:
-                st.caption(f"（預覽僅限本地，雲端請用上方下載按鈕）")
 
     # ── 稅金輸入 ──────────────────────────────────────────────────────────────
     st.divider()
