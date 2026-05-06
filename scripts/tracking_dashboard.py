@@ -30,7 +30,7 @@ try:
         COL_ITEMS, COL_QTY,
         COL_STATUS, COL_STATUS_TIME,
         COL_FREIGHT, COL_NOTES, COL_TAX,
-        COL_PDF_PATH,
+        COL_PDF_PATH, COL_RECEIVED,
         ANOMALY_KEYWORDS,
     )
 except Exception:
@@ -39,7 +39,7 @@ except Exception:
     EXCEL_SHEET   = "追蹤表"
     COL_DATE=1; COL_NAME=2; COL_WAYBILL=4; COL_RECIPIENT=5; COL_PHONE=6
     COL_ADDRESS=7; COL_ITEMS=8; COL_QTY=9; COL_STATUS=13; COL_STATUS_TIME=14
-    COL_FREIGHT=12; COL_NOTES=17; COL_TAX=18; COL_PDF_PATH=16
+    COL_FREIGHT=12; COL_NOTES=17; COL_TAX=18; COL_PDF_PATH=16; COL_RECEIVED=19
     ANOMALY_KEYWORDS = ["退回","異常","卡關","攔截","問題件"]
 
 # 雲端用相對路徑，本地用 config.py 的絕對路徑
@@ -213,6 +213,38 @@ def _save_tax_values(changed_df: pd.DataFrame) -> int:
         return 0
 
 
+def _save_received_values(changed_df: pd.DataFrame) -> int:
+    """Write updated received status back to tracking.xlsx. Returns count saved."""
+    try:
+        wb = openpyxl.load_workbook(EXCEL_PATH)
+        ws = wb[EXCEL_SHEET]
+        if ws.cell(1, COL_RECEIVED).value is None:
+            ws.cell(1, COL_RECEIVED).value = "收件狀態"
+        saved = 0
+        for _, row in changed_df.iterrows():
+            waybill  = str(row.get("運單號", "")).strip()
+            received = row.get("收件狀態", None)
+            if not waybill or waybill in ("None", "nan", ""):
+                continue
+            for excel_row in ws.iter_rows(min_row=2):
+                wb_cell = excel_row[COL_WAYBILL - 1]
+                if str(wb_cell.value or "").strip() == waybill:
+                    excel_row[COL_RECEIVED - 1].value = str(received) if received else None
+                    saved += 1
+                    break
+        wb.save(EXCEL_PATH)
+        if _IS_CLOUD:
+            ok = _push_to_github()
+            if ok:
+                st.success("✅ 收件狀態已同步到 GitHub，本地 Excel 將在下次排程時更新")
+            else:
+                st.warning("⚠️ 本地儲存成功，但 GitHub 同步失敗，請檢查 Secrets 設定")
+        return saved
+    except Exception as e:
+        st.error(f"儲存收件狀態失敗：{e}")
+        return 0
+
+
 # ── Status badge colours ───────────────────────────────────────────────────────
 _STATUS_COLOR = {
     "已簽收":   ("#27ae60", "✅"),
@@ -247,6 +279,20 @@ def _badge(status: str) -> str:
         f'border-radius:12px;font-size:12px;font-weight:600;white-space:nowrap;">'
         f'{icon} {s}</span>'
     )
+
+def _received_badge(status: str) -> str:
+    if status == "收件":
+        return (
+            '<span style="background:#27ae60;color:#fff;padding:3px 8px;'
+            'border-radius:12px;font-size:12px;font-weight:600;">✅ 收件</span>'
+        )
+    if status == "未收件":
+        return (
+            '<span style="background:#e67e22;color:#fff;padding:3px 8px;'
+            'border-radius:12px;font-size:12px;font-weight:600;">⏳ 未收件</span>'
+        )
+    return '<span style="color:#ddd;font-size:11px;">—</span>'
+
 
 def _val(v) -> str:
     if v is None:
@@ -451,9 +497,10 @@ def main():
     freight_col   = df.columns[COL_FREIGHT    - 1]
     notes_col     = df.columns[COL_NOTES      - 1]
     phone_col     = df.columns[COL_PHONE      - 1]
-    # COL_TAX may not exist yet in older Excel files — guard with index check
-    tax_col       = df.columns[COL_TAX - 1] if len(df.columns) >= COL_TAX else None
-    pdf_col       = df.columns[COL_PDF_PATH - 1] if len(df.columns) >= COL_PDF_PATH else None
+    # COL_TAX / COL_RECEIVED may not exist yet in older Excel files — guard with index check
+    tax_col      = df.columns[COL_TAX      - 1] if len(df.columns) >= COL_TAX      else None
+    pdf_col      = df.columns[COL_PDF_PATH - 1] if len(df.columns) >= COL_PDF_PATH else None
+    received_col = df.columns[COL_RECEIVED - 1] if len(df.columns) >= COL_RECEIVED else None
 
     # ── Sidebar: cancel + sync（需要 df，放喺載入後）────────────────────────────
     if not _IS_CLOUD:
@@ -591,8 +638,9 @@ def main():
         stime_v     = _val(row[stime_col])
         freight_v   = _val(row[freight_col])
         notes_v     = _val(row[notes_col])
-        tax_v       = _val(row[tax_col]) if tax_col is not None else ""
-        pdf_rel_v   = _val(row[pdf_col]) if pdf_col is not None else ""
+        tax_v       = _val(row[tax_col])      if tax_col      is not None else ""
+        pdf_rel_v   = _val(row[pdf_col])      if pdf_col      is not None else ""
+        received_v  = _val(row[received_col]) if received_col is not None else ""
 
         is_anom     = any(kw in status for kw in ANOMALY_KEYWORDS)
         is_cancel   = "已取消" in status
@@ -707,12 +755,13 @@ def main():
         else:
             receipt_cell = '<span style="color:#ddd;font-size:11px;">—</span>'
 
-        tax_html   = (
+        tax_html      = (
             f'<span style="color:#e67e22;font-weight:600;">HKD {_esc(tax_v)}</span>'
             if tax_v else
             '<span style="color:#ddd;font-size:11px;">—</span>'
         )
-        files_html = _file_links_html(pdf_rel_v)
+        received_html = _received_badge(received_v)
+        files_html    = _file_links_html(pdf_rel_v)
 
         lkey = f"#{i+1}  {_val(row[date_col])}  {_val(row[name_col])}  {_val(row[waybill_col])}"
         logistics_keys.append((lkey, row))
@@ -729,6 +778,7 @@ def main():
           <td style="padding:8px 10px;text-align:center;">{status_cell}</td>
           <td style="padding:8px 10px;font-size:12px;line-height:1.6;">{receipt_cell}</td>
           <td style="padding:8px 10px;text-align:right;">{tax_html}</td>
+          <td style="padding:8px 10px;text-align:center;">{received_html}</td>
           <td style="padding:8px 10px;text-align:center;">{files_html}</td>
         </tr>""")
 
@@ -748,6 +798,7 @@ def main():
       <th style="padding:10px 10px;text-align:center;font-weight:600;">狀態</th>
       <th style="padding:10px 10px;text-align:left;font-weight:600;">電子存根</th>
       <th style="padding:10px 10px;text-align:right;font-weight:600;">稅金</th>
+      <th style="padding:10px 10px;text-align:center;font-weight:600;">收件狀態</th>
       <th style="padding:10px 10px;text-align:center;font-weight:600;">📥 檔案</th>
     </tr>
     </thead>
@@ -1235,6 +1286,47 @@ def main():
         saved = _save_tax_values(edited)
         if saved:
             st.success(f"✅ 已儲存 {saved} 筆稅金記錄")
+            st.cache_data.clear()
+            st.rerun()
+        else:
+            st.info("沒有可儲存的記錄")
+
+    # ── 收件狀態管理 ──────────────────────────────────────────────────────────
+    st.divider()
+    st.markdown("### 📬 收件狀態管理")
+    st.caption("手動記錄每個訂單是否已實際收到貨物，修改後按「💾 儲存收件狀態」")
+
+    received_data = []
+    for _, r in df.iterrows():
+        recv_v = _val(r[received_col]) if received_col is not None else ""
+        received_data.append({
+            "日期":     _val(r[date_col]),
+            "客人":     _val(r[name_col]),
+            "運單號":   _val(r[waybill_col]),
+            "SF狀態":   _val(r[status_col]),
+            "收件狀態": recv_v if recv_v in ("收件", "未收件") else "未收件",
+        })
+
+    received_df = pd.DataFrame(received_data)
+    edited_received = st.data_editor(
+        received_df,
+        column_config={
+            "日期":     st.column_config.TextColumn("日期",   disabled=True, width="small"),
+            "客人":     st.column_config.TextColumn("客人",   disabled=True, width="small"),
+            "運單號":   st.column_config.TextColumn("運單號", disabled=True, width="medium"),
+            "SF狀態":   st.column_config.TextColumn("SF狀態", disabled=True, width="small"),
+            "收件狀態": st.column_config.SelectboxColumn(
+                "收件狀態", options=["未收件", "收件"], width="small",
+            ),
+        },
+        hide_index=True,
+        use_container_width=True,
+        key="received_editor",
+    )
+    if st.button("💾 儲存收件狀態", type="primary", key="save_received_btn"):
+        saved = _save_received_values(edited_received)
+        if saved:
+            st.success(f"✅ 已儲存 {saved} 筆收件狀態")
             st.cache_data.clear()
             st.rerun()
         else:
