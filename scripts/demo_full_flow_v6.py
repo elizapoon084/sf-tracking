@@ -452,36 +452,40 @@ def reprint_one_waybill(ctx, entry: dict) -> bool:
             if clicked: print(f"     OK (attempt {attempt+1})"); break
             time.sleep(1.5)
         if not clicked: print("     找不到「修改訂單」，跳過"); return False
-        time.sleep(3)
+        time.sleep(30)  # 等修改頁完全載入（需要 30 秒）
 
-        # 3. 直接點「保存」
+        # 3. 直接點「保存」（保存按鈕是 div[role="button"]，非 <button>）
         print("  3. 直接點「保存」")
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        time.sleep(0.8)
+        time.sleep(1)
         saved = False
         for attempt in range(8):
-            saved = page.evaluate("""() => {
-                const targets = ['保存','儲存'];
-                for (const el of document.querySelectorAll('button,[role="button"]')) {
-                    if (el.offsetParent === null) continue;
-                    const t = (el.textContent || '').trim();
-                    if (t === '取消' || t === '取消寄件') continue;
-                    if (targets.some(c => t === c || t.endsWith(c))) { el.click(); return true; }
-                }
-                return false;
-            }""")
-            if saved: print(f"     OK (attempt {attempt+1})"); break
+            try:
+                btn = page.locator('[role="button"]:has-text("保存")').filter(has_not_text="取消").last
+                btn.scroll_into_view_if_needed(timeout=3000)
+                btn.click(timeout=5000)
+                saved = True
+                print(f"     OK (attempt {attempt+1})")
+                break
+            except Exception:
+                pass
             time.sleep(1.5)
         if not saved: print("     找不到「保存」，跳過"); return False
-        print("     等待成功頁面...")
-        time.sleep(5)
+        print("     等待跳至完成頁 (/ship/complete)...")
+        try:
+            page.wait_for_url("**/ship/complete**", timeout=30000)
+            print("     ✅ 已到達完成頁")
+        except Exception:
+            print("     ⚠️  等待跳轉超時，嘗試繼續")
+        time.sleep(20)  # 等完成頁渲染
+        _dismiss_popups(page)
 
-        # 4. 點「列印電子運單」
+        # 4. 點「列印電子運單」（在 /ship/complete 頁底部）
         print("  4. 點「列印電子運單」")
         page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        time.sleep(0.5)
+        time.sleep(1)
         clicked_print = False
-        for attempt in range(6):
+        for attempt in range(8):
             clicked_print = page.evaluate("""() => {
                 const labels = ['列印電子運單','打印電子運單'];
                 for (const el of document.querySelectorAll('button,a,[role="button"],span')) {
@@ -495,14 +499,15 @@ def reprint_one_waybill(ctx, entry: dict) -> bool:
             time.sleep(1.5)
         if not clicked_print: print("     找不到「列印電子運單」，跳過"); return False
         print("     等待 modal...")
-        time.sleep(3)
+        time.sleep(20)  # 等 modal 完全載入
 
-        # 5. 在 modal 點「列印面單」→ 新 tab → CDP 儲存 PDF
-        print("  5. 點「列印面單」並儲存 PDF")
+        # 5. 在 modal 點「列印此頁面」→ 新 tab → CDP 儲存 PDF
+        print("  5. 點「列印此頁面」並儲存 PDF")
         try:
             with page.context.expect_page(timeout=20000) as new_pg_info:
                 page.evaluate("""() => {
-                    const labels = ['列印面單','打印面單'];
+                    // 按鈕文字是「列印此頁面」
+                    const labels = ['列印此頁面','列印頁面','列印面單','打印面單'];
                     for (const el of document.querySelectorAll('button,a,[role="button"]')) {
                         if (el.offsetParent === null) continue;
                         const t = (el.textContent || '').trim();
@@ -718,70 +723,34 @@ def download_pos_word(ctx, pos_order_no, save_dir, customer_name):
         except Exception as dl_err:
             print(f"  ⚠️  Word 下載失敗: {dl_err}")
 
-        # ── 2. 收貨明細（等 blob href ready 先點）────────────────────────────
-        try:
-            # 等 PDFDownloadLink 生成完畢（href 變成 blob:...）
-            try:
-                pos2.wait_for_function(f"""() => {{
-                    for (const a of document.querySelectorAll('a[download]')) {{
-                        const dl = a.getAttribute('download') || '';
-                        if (dl.includes('{pos_order_no}') && dl.includes('明細')
-                            && a.href && a.href.startsWith('blob:')) return true;
-                    }}
-                    return false;
-                }}""", timeout=20000)
-                print("  [OK] 收貨明細 PDF 已就緒")
-            except Exception:
-                print("  [WARN] 等待收貨明細 PDF 超時，嘗試直接點擊")
-            with pos2.expect_download(timeout=15000) as dl_info:
-                pos2.evaluate(f"""() => {{
-                    for (const a of document.querySelectorAll('a[download]')) {{
-                        if (a.offsetParent === null) continue;
-                        const dl = a.getAttribute('download') || '';
-                        if (dl.includes('{pos_order_no}') && dl.includes('明細')) {{
-                            a.click(); return true;
-                        }}
-                    }}
-                }}""")
-            dl = dl_info.value
-            ext = os.path.splitext(dl.suggested_filename)[1] or ".pdf"
-            receipt_path = os.path.join(save_dir, f"{file_base}_收貨明細{ext}")
-            dl.save_as(receipt_path)
-            print(f"  ✅ 收貨明細已儲存: {receipt_path}")
-        except Exception as dl_err:
-            print(f"  ⚠️  收貨明細下載失敗: {dl_err}")
-
-        # ── 3. 清關PDF（等 blob href ready 先點）────────────────────────────
+        # ── 2. 明細+清關合併PDF（等 blob 就緒 → 按 <a> → expect_download）────
         try:
             try:
-                pos2.wait_for_function(f"""() => {{
-                    for (const a of document.querySelectorAll('a[download]')) {{
-                        const dl = a.getAttribute('download') || '';
-                        if (dl.includes('{pos_order_no}') && dl.includes('清關')
-                            && a.href && a.href.startsWith('blob:')) return true;
-                    }}
+                pos2.wait_for_function("""() => {
+                    for (const a of document.querySelectorAll('a[download]')) {
+                        const dl   = a.getAttribute('download') || '';
+                        const href = a.getAttribute('href') || '';
+                        if (dl.includes('明細') && href.startsWith('blob:')) return true;
+                    }
                     return false;
-                }}""", timeout=20000)
-                print("  [OK] 清關 PDF 已就緒")
+                }""", timeout=30000)
+                print("  [OK] 明細+清關 blob 已就緒")
             except Exception:
-                print("  [WARN] 等待清關 PDF 超時，嘗試直接點擊")
-            with pos2.expect_download(timeout=15000) as dl_info:
-                pos2.evaluate(f"""() => {{
-                    for (const a of document.querySelectorAll('a[download]')) {{
-                        if (a.offsetParent === null) continue;
-                        const dl = a.getAttribute('download') || '';
-                        if (dl.includes('{pos_order_no}') && dl.includes('清關')) {{
-                            a.click(); return true;
-                        }}
-                    }}
-                }}""")
-            dl = dl_info.value
-            ext = os.path.splitext(dl.suggested_filename)[1] or ".pdf"
-            customs_path = os.path.join(save_dir, f"{file_base}_清關{ext}")
-            dl.save_as(customs_path)
-            print(f"  ✅ 清關PDF已儲存: {customs_path}")
+                print("  [WARN] 等待明細+清關 blob 超時，仍嘗試點擊")
+            with pos2.expect_download(timeout=15000) as dl2_info:
+                pos2.evaluate("""() => {
+                    for (const a of document.querySelectorAll('a[download]')) {
+                        if ((a.getAttribute('download') || '').includes('明細')) {
+                            a.click(); return;
+                        }
+                    }
+                }""")
+            dl2 = dl2_info.value
+            combined_path = os.path.join(save_dir, f"{file_base}_明細+清關.pdf")
+            dl2.save_as(combined_path)
+            print(f"  ✅ 明細+清關PDF已儲存: {combined_path}")
         except Exception as dl_err:
-            print(f"  ⚠️  清關PDF下載失敗: {dl_err}")
+            print(f"  ⚠️  明細+清關PDF下載失敗: {dl_err}")
 
     except Exception as e:
         print(f"  ⚠️  POS 文件下載失敗: {e}")
@@ -954,6 +923,18 @@ with sync_playwright() as pw:
                 print("\n▶ Step 2: 登入 POS 後台")
                 pos_page = ctx.new_page()
                 pos_page.goto(POS_URL, wait_until="domcontentloaded", timeout=20000)
+                # 清除 Service Worker 快取，確保載入最新版本
+                pos_page.evaluate("""async () => {
+                    if (navigator.serviceWorker) {
+                        const rs = await navigator.serviceWorker.getRegistrations();
+                        for (const r of rs) await r.unregister();
+                    }
+                    if (window.caches) {
+                        const ks = await caches.keys();
+                        await Promise.all(ks.map(k => caches.delete(k)));
+                    }
+                }""")
+                pos_page.reload(wait_until="domcontentloaded", timeout=20000)
                 time.sleep(3)
 
                 pos_page.locator("button:has-text('后台管理')").first.click()
@@ -985,6 +966,8 @@ with sync_playwright() as pw:
                     try:
                         btn = pos_page.locator(f"button:has-text('{item['sku']}')").first
                         btn.wait_for(state="visible", timeout=15000)
+                        btn.scroll_into_view_if_needed(timeout=5000)
+                        time.sleep(0.3)
                         for _ in range(item["qty"]):
                             btn.click()
                             time.sleep(0.25)
@@ -1013,87 +996,54 @@ with sync_playwright() as pw:
                 save_dir  = os.path.join(ORDERS_DIR, order_folder_name)  # git-tracked
                 os.makedirs(save_dir, exist_ok=True)
                 file_base = f"{DEMO_CUSTOMER}_{today}_{pos_order_no}"
-                pdf_path  = os.path.join(save_dir, file_base + ".pdf")
-                png_path  = os.path.join(save_dir, file_base + ".png")
-                pdf_rel   = f"data/orders/{order_folder_name}/{file_base}.pdf"  # relative path for Excel + cloud
+                # 全合一PDF 路徑（小票+明細+清關，3頁合一）
+                combined_path = os.path.join(save_dir, f"{file_base}_明細+清關.pdf")
+                pdf_path = combined_path
+                pdf_rel  = f"data/orders/{order_folder_name}/{file_base}_明細+清關.pdf"
 
-                # ── 5a. 小票 PDF ──────────────────────────────────────────────────
+                # ── 5. 等全合一PDF blob 就緒，然後下載（小票+明細+清關 3頁）──────
+                print("  [Step 5] 等待全合一PDF blob（3頁：小票+明細+清關）...")
                 try:
-                    with pos_page.expect_download(timeout=15000) as dl_info:
+                    try:
+                        pos_page.wait_for_function("""() => {
+                            for (const a of document.querySelectorAll('a[download]')) {
+                                const dl   = a.getAttribute('download') || '';
+                                const href = a.getAttribute('href') || '';
+                                if (dl.includes('明細') && href.startsWith('blob:')) return true;
+                            }
+                            return false;
+                        }""", timeout=120000)
+                        print("  全合一 blob 已就緒")
+                    except Exception:
+                        _dbg = pos_page.evaluate("""() => {
+                            return [...document.querySelectorAll('a[download]')].map(a=>({
+                                dl: a.getAttribute('download')||'',
+                                href: (a.getAttribute('href')||'').slice(0,40),
+                                btn: (a.querySelector('button')?.textContent||'').trim().slice(0,25)
+                            }));
+                        }""")
+                        print(f"  等待 blob 超時，頁面連結: {_dbg}")
+                    time.sleep(5)
+                    with pos_page.expect_download(timeout=30000) as dl_info:
                         pos_page.evaluate("""() => {
-                            for (const el of document.querySelectorAll('button, a, [role="button"]')) {
-                                if (el.offsetParent === null) continue;
-                                const txt = el.textContent.trim();
-                                if (txt.includes('小票PDF') || txt.includes('DOWNLOAD PDF')
-                                    || txt.includes('DOWNLOAD')) { el.click(); return; }
+                            for (const a of document.querySelectorAll('a[download]')) {
+                                if ((a.getAttribute('download') || '').includes('明細')) {
+                                    a.click(); return;
+                                }
                             }
                         }""")
                     dl = dl_info.value
-                    dl.save_as(pdf_path)
-                    print(f"  小票已儲存: {pdf_path}")
-                except Exception as dl_err:
-                    print(f"  下載攔截失敗，改截圖備份: {dl_err}")
+                    dl.save_as(combined_path)
+                    print(f"  全合一PDF已儲存: {combined_path}")
+                except Exception as e:
+                    print(f"  ⚠️  全合一PDF下載失敗，改截圖備份: {e}")
+                    png_path = os.path.join(save_dir, file_base + ".png")
                     pos_page.screenshot(path=png_path, full_page=False)
                     pdf_path = png_path
                     pdf_rel  = f"data/orders/{order_folder_name}/{file_base}.png"
                     print(f"  截圖備份: {png_path}")
 
-                # ── 5b. 清關 PDF（等 blob 就緒後點）─────────────────────────────
-                try:
-                    try:
-                        pos_page.wait_for_function("""() => {
-                            for (const a of document.querySelectorAll('a[download]')) {
-                                if (a.getAttribute('download').includes('清關')
-                                    && a.href && a.href.startsWith('blob:')) return true;
-                            }
-                            return false;
-                        }""", timeout=20000)
-                        print("  清關 PDF 已就緒")
-                    except Exception:
-                        print("  等待清關 PDF 超時，嘗試直接點擊")
-                    with pos_page.expect_download(timeout=15000) as dl_info:
-                        pos_page.evaluate("""() => {
-                            for (const a of document.querySelectorAll('a[download]')) {
-                                if (a.offsetParent === null) continue;
-                                if (a.getAttribute('download').includes('清關')) { a.click(); return; }
-                            }
-                        }""")
-                    dl  = dl_info.value
-                    ext = os.path.splitext(dl.suggested_filename)[1] or ".pdf"
-                    customs_path = os.path.join(save_dir, f"{file_base}_清關{ext}")
-                    dl.save_as(customs_path)
-                    print(f"  清關PDF已儲存: {customs_path}")
-                except Exception as e:
-                    print(f"  清關PDF下載失敗: {e}")
-
-                # ── 5c. 收貨明細 PDF（等 blob 就緒後點）─────────────────────────
-                try:
-                    try:
-                        pos_page.wait_for_function("""() => {
-                            for (const a of document.querySelectorAll('a[download]')) {
-                                if (a.getAttribute('download').includes('明細')
-                                    && a.href && a.href.startsWith('blob:')) return true;
-                            }
-                            return false;
-                        }""", timeout=20000)
-                        print("  收貨明細 PDF 已就緒")
-                    except Exception:
-                        print("  等待收貨明細 PDF 超時，嘗試直接點擊")
-                    with pos_page.expect_download(timeout=15000) as dl_info:
-                        pos_page.evaluate("""() => {
-                            for (const a of document.querySelectorAll('a[download]')) {
-                                if (a.offsetParent === null) continue;
-                                if (a.getAttribute('download').includes('明細')) { a.click(); return; }
-                            }
-                        }""")
-                    dl  = dl_info.value
-                    ext = os.path.splitext(dl.suggested_filename)[1] or ".pdf"
-                    receipt_path = os.path.join(save_dir, f"{file_base}_收貨明細{ext}")
-                    dl.save_as(receipt_path)
-                    print(f"  收貨明細已儲存: {receipt_path}")
-                except Exception as e:
-                    print(f"  收貨明細下載失敗: {e}")
-
+                # 關閉收據 Modal
                 try:
                     done_btn = pos_page.locator("button:has-text('完成')").first
                     if done_btn.is_visible(timeout=2000):
@@ -1203,7 +1153,7 @@ with sync_playwright() as pw:
 
                     js_fill_by_label(sf_page, "物品名稱", item["name"])
                     sf_page.keyboard.press("Tab")
-                    time.sleep(4)
+                    time.sleep(5)
                     print("  ✅ 物品名稱")
 
                     js_fill_by_label(sf_page, "品牌", item["brand"]); time.sleep(2)
@@ -1296,63 +1246,98 @@ with sync_playwright() as pw:
                 time.sleep(9)
 
                 print("\n▶ Step 11: 付款方式 → 寄付月結")
-                sf_page.evaluate("""() => {
-                    for (const el of document.querySelectorAll('*')) {
-                        if (el.offsetParent===null || el.children.length>0) continue;
-                        const t = el.textContent.trim();
-                        if (t!=='月結' && t!=='寄付月結') continue;
-                        const r = el.getBoundingClientRect();
-                        if (r.width<20||r.height<15) continue;
-                        el.click(); return;
-                    }
-                }""")
-                time.sleep(1.5)
-                print("  ✅ 寄付月結已選")
+                monthly_clicked = False
+                for _attempt in range(6):
+                    clicked = sf_page.evaluate("""() => {
+                        const keywords = ['月結','寄付月結','月结','寄付月结'];
+                        for (const el of document.querySelectorAll('*')) {
+                            if (el.offsetParent===null || el.children.length>0) continue;
+                            const t = el.textContent.trim();
+                            if (!keywords.includes(t)) continue;
+                            const r = el.getBoundingClientRect();
+                            if (r.width<20||r.height<15) continue;
+                            el.click(); return true;
+                        }
+                        return false;
+                    }""")
+                    if clicked:
+                        monthly_clicked = True
+                        break
+                    time.sleep(1.5)
+                if monthly_clicked:
+                    print("  ✅ 寄付月結已選")
+                else:
+                    print("  ⚠️  找不到「月結」選項，嘗試繼續填帳號")
+                time.sleep(3)  # 等待月結帳號輸入欄渲染
 
                 print(f"\n▶ Step 12: 填月結卡號 {MONTHLY_ACCOUNT}")
                 sf_page.evaluate("""() => {
                     for (const el of document.querySelectorAll('*')) {
-                        if (el.textContent.trim()==='付款方式' && el.offsetParent!==null)
-                            { el.scrollIntoView({block:'center'}); return; }
+                        if (el.offsetParent!==null) {
+                            const t = el.textContent.trim();
+                            if (t==='付款方式'||t==='付款') { el.scrollIntoView({block:'center'}); return; }
+                        }
                     }
                 }""")
-                time.sleep(0.8)
-                acct_info = sf_page.evaluate("""() => {
-                    for (const inp of document.querySelectorAll('input')) {
-                        if (inp.offsetParent===null) continue;
-                        const ph = inp.placeholder||'';
-                        const r = inp.getBoundingClientRect();
-                        if (r.width===0||r.height===0) continue;
-                        if (ph.includes('月結')||ph.includes('卡號'))
-                            return {x:r.left+r.width/2, y:r.top+r.height/2};
-                    }
-                    return null;
-                }""")
+                time.sleep(1)
+                acct_info = None
+                for _attempt in range(8):
+                    acct_info = sf_page.evaluate("""() => {
+                        const phKeys = ['月結','卡號','帳號','账号','月结','卡号','帐号'];
+                        for (const inp of document.querySelectorAll('input,textarea')) {
+                            if (inp.offsetParent===null) continue;
+                            const r = inp.getBoundingClientRect();
+                            if (r.width===0||r.height===0) continue;
+                            const ph = inp.placeholder||'';
+                            const nm = inp.name||'';
+                            if (phKeys.some(k=>ph.includes(k)||nm.includes(k)))
+                                return {x:r.left+r.width/2, y:r.top+r.height/2, method:'placeholder'};
+                        }
+                        // fallback: find input near label containing 月結/帳號
+                        for (const label of document.querySelectorAll('*')) {
+                            if (label.offsetParent===null||label.children.length>0) continue;
+                            const lt = label.textContent.trim();
+                            if (!lt.includes('月結')&&!lt.includes('帳號')&&!lt.includes('账号')&&!lt.includes('月结')) continue;
+                            const lr = label.getBoundingClientRect();
+                            let best=null, bestDist=300;
+                            for (const inp of document.querySelectorAll('input')) {
+                                if (inp.offsetParent===null) continue;
+                                const ir = inp.getBoundingClientRect();
+                                if (ir.width===0||ir.height===0) continue;
+                                const dist = Math.hypot(ir.left-lr.right, ir.top-lr.top);
+                                if (dist<bestDist) { bestDist=dist; best={x:ir.left+ir.width/2,y:ir.top+ir.height/2,method:'label'}; }
+                            }
+                            if (best) return best;
+                        }
+                        return null;
+                    }""")
+                    if acct_info:
+                        break
+                    time.sleep(0.5)
                 if acct_info:
+                    print(f"  找到月結輸入欄 (方式: {acct_info.get('method','?')})")
                     sf_page.mouse.click(acct_info["x"], acct_info["y"])
-                    time.sleep(0.3)
-                    sf_page.mouse.click(acct_info["x"], acct_info["y"])
-                    time.sleep(0.3)
+                    time.sleep(0.4)
                     sf_page.keyboard.press("Control+A")
-                    sf_page.keyboard.press("Delete")
-                    sf_page.keyboard.type(MONTHLY_ACCOUNT, delay=50)
-                    time.sleep(0.8)
+                    sf_page.keyboard.type(MONTHLY_ACCOUNT, delay=60)
+                    time.sleep(1)
                     sf_page.evaluate(f"""() => {{
                         for (const el of document.querySelectorAll('*')) {{
                             if (el.offsetParent===null||el.children.length>0) continue;
                             const t = el.textContent.trim();
                             if (t.includes('{MONTHLY_ACCOUNT}')&&t.length<50) {{
                                 const r=el.getBoundingClientRect();
-                                if (r.width<30) return;
+                                if (r.width<30) continue;
                                 el.click(); return;
                             }}
                         }}
                     }}""")
+                    time.sleep(0.5)
                     sf_page.keyboard.press("Tab")
                     time.sleep(0.5)
                     print("  ✅ 月結卡號已填")
                 else:
-                    print("  ⚠️  月結卡號欄位未找到")
+                    print("  ⚠️  月結卡號欄位未找到，請手動檢查")
 
                 print("\n▶ Step 13a: 閱讀並同意")
                 sf_page.evaluate("""() => {
@@ -1473,85 +1458,37 @@ with sync_playwright() as pw:
                 # ── 列印電子運單 → 儲存 PDF ──────────────────────────────────────
                 try:
                     print("\n▶ Step 14: 列印電子運單")
-                    waybill_pdf_name = f"{DEMO_CUSTOMER}_{today}_{pos_order_no}_{waybill}_運單.pdf"
-                    waybill_pdf_path = os.path.join(save_dir, waybill_pdf_name)
+                    time.sleep(2)
 
-                    # 直接導航到運單詳情頁
-                    print(f"  → 前往運單詳情頁: {SF_DETAIL_BASE}/{waybill}")
-                    sf_page.goto(f"{SF_DETAIL_BASE}/{waybill}",
-                                 wait_until="domcontentloaded", timeout=30000)
-                    time.sleep(3)
-                    _dismiss_popups(sf_page)
-
-                    # 必須先「修改訂單」→「保存」，「列印電子運單」才會出現
-                    print("  → 點「修改訂單」")
-                    for attempt in range(8):
-                        clicked_mod = sf_page.evaluate("""() => {
-                            for (const el of document.querySelectorAll('button,a,[role="button"],span,div')) {
-                                if (el.offsetParent === null) continue;
-                                const t = (el.textContent || '').trim();
-                                if (t === '修改訂單' || t === '修改订单') { el.click(); return true; }
-                            }
-                            return false;
-                        }""")
-                        if clicked_mod:
-                            print(f"     ✅ 已點修改訂單 (attempt {attempt+1})")
-                            break
-                        time.sleep(1.5)
-                    else:
-                        raise Exception("找不到「修改訂單」按鈕")
-                    time.sleep(3)
-
-                    print("  → 點「保存」")
+                    # 滾到頁面底部，確保按鈕可見
                     sf_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    time.sleep(0.8)
-                    for attempt in range(8):
-                        saved_mod = sf_page.evaluate("""() => {
-                            const targets = ['保存','儲存'];
-                            for (const el of document.querySelectorAll('button,[role="button"]')) {
-                                if (el.offsetParent === null) continue;
-                                const t = (el.textContent || '').trim();
-                                if (t === '取消' || t === '取消寄件') continue;
-                                if (targets.some(c => t === c || t.endsWith(c))) { el.click(); return true; }
-                            }
-                            return false;
-                        }""")
-                        if saved_mod:
-                            print(f"     ✅ 已點保存 (attempt {attempt+1})")
-                            break
-                        time.sleep(1.5)
-                    else:
-                        raise Exception("找不到「保存」按鈕")
-                    print("     等待保存完成...")
-                    time.sleep(5)
+                    time.sleep(1)
 
-                    # 點「列印電子運單」（保存後才出現）
-                    print("  → 點「列印電子運單」")
-                    sf_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                    time.sleep(0.5)
-                    clicked_print = False
-                    for attempt in range(6):
-                        clicked_print = sf_page.evaluate("""() => {
-                            const labels = ['列印電子運單', '打印電子運單'];
-                            for (const el of document.querySelectorAll('button, a, [role="button"], span')) {
-                                if (el.offsetParent === null) continue;
-                                const t = (el.textContent || '').trim();
-                                if (labels.some(l => t === l || t.includes(l))) {
-                                    el.click(); return true;
-                                }
+                    # 點「列印電子運單」按鈕
+                    clicked_print = sf_page.evaluate("""() => {
+                        const labels = ['列印電子運單', '打印電子運單'];
+                        for (const el of document.querySelectorAll('button, a, [role="button"], span')) {
+                            if (el.offsetParent === null) continue;
+                            const t = (el.textContent || '').trim();
+                            if (labels.some(l => t === l || t.includes(l))) {
+                                el.click(); return true;
                             }
-                            return false;
-                        }""")
-                        if clicked_print:
-                            print(f"     ✅ 已點列印電子運單 (attempt {attempt+1})")
-                            break
-                        time.sleep(1.5)
+                        }
+                        return false;
+                    }""")
 
                     if not clicked_print:
                         print("  ⚠️  找不到列印電子運單按鈕，跳過")
                     else:
+                        print("  ✅ 已點列印電子運單")
                         time.sleep(2.5)
+
+                        # 攔截點「列印面單」後彈出嘅新頁面
+                        waybill_pdf_name = f"{DEMO_CUSTOMER}_{today}_{pos_order_no}_{waybill}_運單.pdf"
+                        waybill_pdf_path = os.path.join(save_dir, waybill_pdf_name)
+
                         with ctx.expect_page() as new_page_info:
+                            # 點紅色「列印面單」按鈕
                             sf_page.evaluate("""() => {
                                 const labels = ['列印面單', '列印頁面', '打印面單', '打印頁面'];
                                 for (const el of document.querySelectorAll('button, a, [role="button"]')) {
@@ -1563,10 +1500,12 @@ with sync_playwright() as pw:
                                 }
                                 return false;
                             }""")
+
                         print_page = new_page_info.value
                         print_page.wait_for_load_state("networkidle", timeout=10000)
                         time.sleep(1.5)
 
+                        # 用 CDP 儲存列印頁面為 PDF
                         import base64 as _b64
                         cdp = ctx.new_cdp_session(print_page)
                         result = cdp.send("Page.printToPDF", {
@@ -1630,8 +1569,10 @@ with sync_playwright() as pw:
         _session = []
         for c, w, p in batch_completed:
             _receipt_dir  = os.path.dirname(p)
-            _receipt_base = os.path.basename(p).replace(".pdf", "")
-            _waybill_pdf  = os.path.join(_receipt_dir, f"{_receipt_base}_{w}_運單.pdf")
+            _raw_base     = os.path.basename(p).replace(".pdf", "")
+            # 去掉 _明細+清關 suffix，還原純 file_base
+            _file_base    = _raw_base.split("_明細+清關")[0] if "_明細+清關" in _raw_base else _raw_base
+            _waybill_pdf  = os.path.join(_receipt_dir, f"{_file_base}_{w}_運單.pdf")
             _session.append({"customer": c, "waybill": w, "pdf_path": _waybill_pdf})
         try:
             os.makedirs(os.path.dirname(_SESSION_FILE), exist_ok=True)
@@ -1672,35 +1613,26 @@ with sync_playwright() as pw:
             _pos_order_no = next((p for p in _file_base.split("_") if p.startswith("ORD-")), None)
 
             _files = os.listdir(_save_dir) if os.path.exists(_save_dir) else []
-            _has_ticket  = any(f.endswith((".pdf",".png")) and "_運單" not in f
-                               and "_收貨明細" not in f and "_清關" not in f
-                               and "_清單" not in f for f in _files)
-            _has_waybill = any("_運單" in f and f.endswith(".pdf") for f in _files)
-            _has_receipt = any("_收貨明細" in f for f in _files)
-            _has_customs = any("_清關" in f for f in _files)
+            _has_combined = any("_明細+清關" in f for f in _files)
+            _has_waybill  = any("_運單" in f and f.endswith(".pdf") for f in _files)
 
             _missing = []
-            if not _has_ticket:  _missing.append("小票")
-            if not _has_waybill: _missing.append("運單")
-            if not _has_receipt: _missing.append("收貨明細")
-            if not _has_customs: _missing.append("清關")
+            if not _has_combined: _missing.append("明細+清關(全合一)")
+            if not _has_waybill:  _missing.append("運單")
 
             if not _missing:
-                print(f"  [OK] {_customer} ({_pos_order_no}) — 4/4 齊全")
+                print(f"  [OK] {_customer} ({_pos_order_no}) — 2/2 齊全")
             else:
                 all_ok = False
                 print(f"  [缺] {_customer} ({_pos_order_no}) — 缺少: {', '.join(_missing)}")
-                _need_pos = [m for m in _missing if m in ("收貨明細", "清關")]
-                if _need_pos and _pos_order_no:
-                    print(f"    -> 自動補下載: {', '.join(_need_pos)}")
+                if "明細+清關" in str(_missing) and _pos_order_no:
+                    print(f"    -> 自動補下載: 明細+清關")
                     try:
                         download_pos_word(ctx, _pos_order_no, _save_dir, _customer)
                     except Exception as _re:
                         print(f"    -> 補下載失敗: {_re}")
                 if "運單" in _missing:
                     print(f"    -> 運單缺失，請手動跑 fix_waybill_v6.py 補印")
-                if "小票" in _missing:
-                    print(f"    -> 小票缺失，請手動補印")
 
         if all_ok:
             print(f"\n  [完成] 第 {batch_idx+1} 批所有訂單檔案齊全！")
@@ -1714,32 +1646,22 @@ with sync_playwright() as pw:
     print(f"  📊 Excel 追蹤表：{EXCEL_PATH}")
     print(f"{'='*60}")
 
-    # ── 自動清關上傳（v6 完成後接續跑，同一 ChromeAutomation profile）────────
+    # ── 自動清關上傳（v6 瀏覽器關閉後直接跑 clearance_upload.py）────────────
     # 必須先關閉 v6 瀏覽器，clearance_upload 才能開啟同一個 Chrome profile
     ctx.close()
 
+    import subprocess as _sp, sys as _sys
+    _cl_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'clearance_upload.py')
+    print(f"\n{'='*60}")
+    print(f"  [清關上傳] 開始執行 clearance_upload.py --auto ...")
+    print(f"{'='*60}")
     try:
-        import importlib.util as _ilu, json as _jcl
-        _cl_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'clearance_upload.py')
-        _spec = _ilu.spec_from_file_location('clearance_upload', _cl_path)
-        _cl_mod = _ilu.module_from_spec(_spec)
-        _spec.loader.exec_module(_cl_mod)
-
-        _session_file = r"C:\Users\user\Desktop\順丰E順递\data\last_session.json"
-        with open(_session_file, encoding='utf-8') as _f:
-            _cl_entries = _jcl.load(_f)
-
-        if _cl_entries:
-            print(f"\n{'='*60}")
-            print(f"  [清關上傳] 自動開始 — 共 {len(_cl_entries)} 筆")
-            print(f"{'='*60}")
-            _cl_mod.run_clearance(_cl_entries, dry_run=False, log_fn=print)
-            print(f"\n{'='*60}")
-            print(f"  [清關上傳] 全部完成")
-            print(f"{'='*60}")
+        _result = _sp.run([_sys.executable, _cl_path, '--auto'], check=False)
+        if _result.returncode == 0:
+            print(f"  [清關上傳] 完成 ✅")
         else:
-            print("\n  [清關上傳] last_session.json 為空，略過清關步驟")
+            print(f"  [清關上傳] 結束（return code: {_result.returncode}）")
     except Exception as _ce:
-        print(f"\n  [清關上傳] 發生錯誤：{_ce}")
+        print(f"  [清關上傳] 執行失敗：{_ce}")
 
     input("\n按 Enter 結束…")

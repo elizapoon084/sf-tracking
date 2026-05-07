@@ -67,8 +67,7 @@ _SF_NUM_RE = _re.compile(r'SF\d{15,}', _re.IGNORECASE)
 
 
 def _file_links_html(pdf_rel: str) -> str:
-    """Return a 2-row HTML grid of download links: 小票+運單 / 明細+清關."""
-    import base64 as _b64
+    """Return download links: 合一PDF（小票+明細+清關） + 運單."""
     from urllib.parse import quote as _q
 
     _PILL = (
@@ -77,10 +76,8 @@ def _file_links_html(pdf_rel: str) -> str:
         'margin:1px 2px;font-weight:600;'
     )
     _STYLES = {
-        "小票":  dict(bg="#e8f5e9", fg="#27ae60", border="#a5d6a7"),
-        "運單":  dict(bg="#e3f2fd", fg="#1565c0", border="#90caf9"),
-        "明細":  dict(bg="#e0f2f1", fg="#00695c", border="#80cbc4"),
-        "清關":  dict(bg="#f3e5f5", fg="#6a1b9a", border="#ce93d8"),
+        "合一PDF": dict(bg="#e8f5e9", fg="#27ae60", border="#a5d6a7"),
+        "運單":    dict(bg="#e3f2fd", fg="#1565c0", border="#90caf9"),
     }
 
     if not pdf_rel:
@@ -89,41 +86,33 @@ def _file_links_html(pdf_rel: str) -> str:
     order_dir_rel = os.path.dirname(pdf_rel).replace("\\", "/")
     order_dir_abs = os.path.dirname(_resolve_path(pdf_rel))
 
-    slots = {"小票": None, "運單": None, "明細": None, "清關": None}
+    slots = {"合一PDF": None, "運單": None}
 
     if os.path.isdir(order_dir_abs):
         for fname in sorted(os.listdir(order_dir_abs)):
-            fpath = os.path.join(order_dir_abs, fname)
-            if not fname.endswith((".pdf", ".png", ".doc", ".docx")):
+            if not fname.endswith(".pdf"):
                 continue
             url = _GH_RAW + _q(f"{order_dir_rel}/{fname}", safe="/")
-
-            if fname.endswith((".doc", ".docx")):
-                continue  # Word清單 not shown in table cell
-            if "運單" in fname or _SF_NUM_RE.search(fname):
+            if "運單" in fname and _SF_NUM_RE.search(fname):
                 key = "運單"
-            elif "收貨明細" in fname:
-                key = "明細"
-            elif "清關" in fname:
-                key = "清關"
-            elif slots["小票"] is None:
-                key = "小票"
+            elif "明細+清關" in fname:
+                key = "合一PDF"
             else:
                 continue
             s = _STYLES[key]
+            icon = "📄" if key == "合一PDF" else "📦"
             slots[key] = (
                 f'<a href="{url}" target="_blank" style="{_PILL.format(**s)}">'
-                f'{"🧾" if key=="小票" else "📦" if key=="運單" else "📋" if key=="明細" else "🛃"}'
-                f' {key}</a>'
+                f'{icon} {key}</a>'
             )
 
-    row1 = (slots["小票"] or "") + (slots["運單"] or "")
-    row2 = (slots["明細"] or "") + (slots["清關"] or "")
-    if not row1 and not row2:
+    parts = [v for v in (slots["合一PDF"], slots["運單"]) if v]
+    if not parts:
         return '<span style="color:#ddd;font-size:11px;">—</span>'
     return (
         f'<div style="display:flex;flex-direction:column;gap:2px;min-width:110px;">'
-        f'<div>{row1}</div><div>{row2}</div></div>'
+        + "".join(f"<div>{p}</div>" for p in parts)
+        + "</div>"
     )
 
 
