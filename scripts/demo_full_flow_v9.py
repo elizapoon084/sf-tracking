@@ -129,15 +129,29 @@ def show_order_input() -> list:
     root = tk.Tk()
     root.title("順丰寄件 — 輸入客人訂單")
     root.resizable(True, True)
-    root.geometry("860x620")
+    root.geometry("900x820")
 
-    # ── 10-row input grid ──────────────────────────────────────────────────
+    # ── 可滾動輸入框 ───────────────────────────────────────────────────────
     input_lf = tk.LabelFrame(
         root,
         text="WhatsApp 訂單 (每行一個客人，貼入後按解析)",
         padx=6, pady=6,
     )
-    input_lf.pack(fill="x", padx=12, pady=(12, 4))
+    input_lf.pack(fill="both", padx=12, pady=(12, 4), expand=False)
+
+    canvas_frame = tk.Canvas(input_lf, height=min(_NUM_ROWS * 28, 420))
+    vsb = tk.Scrollbar(input_lf, orient="vertical", command=canvas_frame.yview)
+    canvas_frame.configure(yscrollcommand=vsb.set)
+    vsb.pack(side="right", fill="y")
+    canvas_frame.pack(side="left", fill="both", expand=True)
+
+    inner = tk.Frame(canvas_frame)
+    canvas_frame.create_window((0, 0), window=inner, anchor="nw")
+    inner.bind("<Configure>",
+               lambda e: canvas_frame.configure(
+                   scrollregion=canvas_frame.bbox("all")))
+    canvas_frame.bind("<MouseWheel>",
+                      lambda e: canvas_frame.yview_scroll(-1*(e.delta//120), "units"))
 
     row_vars   = []
     row_status = []
@@ -148,7 +162,7 @@ def show_order_input() -> list:
         row_vars.append(sv)
         row_status.append(rst)
 
-        row_frame = tk.Frame(input_lf)
+        row_frame = tk.Frame(inner)
         row_frame.pack(fill="x", pady=1)
 
         tk.Label(row_frame, text=f"{i+1:2d}.", width=3,
@@ -160,7 +174,7 @@ def show_order_input() -> list:
                  width=10, anchor="w", font=("", 9)).pack(side="left")
 
     btn_row_top = tk.Frame(input_lf)
-    btn_row_top.pack(fill="x", pady=(6, 0))
+    btn_row_top.pack(fill="x", pady=(6, 0), side="bottom")
     tk.Button(btn_row_top, text="🗑 清除全部",
               command=lambda: [sv.set("") or rst.set("")
                                for sv, rst in zip(row_vars, row_status)],
