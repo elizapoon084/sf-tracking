@@ -1448,39 +1448,82 @@ with sync_playwright() as pw:
                 waybill_pdf_name = f"{DEMO_CUSTOMER}_{today}_{pos_order_no}_{waybill}_運單.pdf"
                 waybill_pdf_path = os.path.join(save_dir, waybill_pdf_name)
 
-                # 直接導航到運單詳情頁（比在確認頁找按鈕可靠）
+                # 直接導航到運單詳情頁
                 print(f"  → 前往運單詳情頁: {SF_DETAIL_BASE}/{waybill}")
                 sf_page.goto(f"{SF_DETAIL_BASE}/{waybill}",
                              wait_until="domcontentloaded", timeout=30000)
                 time.sleep(3)
                 _dismiss_popups(sf_page)
 
-                # 滾到頁面底部，確保按鈕可見
-                sf_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-                time.sleep(1)
-
-                # 點「列印電子運單」按鈕
-                clicked_print = sf_page.evaluate("""() => {
-                    const labels = ['列印電子運單', '打印電子運單'];
-                    for (const el of document.querySelectorAll('button, a, [role="button"], span')) {
-                        if (el.offsetParent === null) continue;
-                        const t = (el.textContent || '').trim();
-                        if (labels.some(l => t === l || t.includes(l))) {
-                            el.click(); return true;
+                # 必須先「修改訂單」→「保存」，「列印電子運單」才會出現
+                print("  → 點「修改訂單」")
+                for attempt in range(8):
+                    clicked_mod = sf_page.evaluate("""() => {
+                        for (const el of document.querySelectorAll('button,a,[role="button"],span,div')) {
+                            if (el.offsetParent === null) continue;
+                            const t = (el.textContent || '').trim();
+                            if (t === '修改訂單' || t === '修改订单') { el.click(); return true; }
                         }
-                    }
-                    return false;
-                }""")
+                        return false;
+                    }""")
+                    if clicked_mod:
+                        print(f"     ✅ 已點修改訂單 (attempt {attempt+1})")
+                        break
+                    time.sleep(1.5)
+                else:
+                    raise Exception("找不到「修改訂單」按鈕")
+                time.sleep(3)
+
+                print("  → 點「保存」")
+                sf_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(0.8)
+                for attempt in range(8):
+                    saved_mod = sf_page.evaluate("""() => {
+                        const targets = ['保存','儲存'];
+                        for (const el of document.querySelectorAll('button,[role="button"]')) {
+                            if (el.offsetParent === null) continue;
+                            const t = (el.textContent || '').trim();
+                            if (t === '取消' || t === '取消寄件') continue;
+                            if (targets.some(c => t === c || t.endsWith(c))) { el.click(); return true; }
+                        }
+                        return false;
+                    }""")
+                    if saved_mod:
+                        print(f"     ✅ 已點保存 (attempt {attempt+1})")
+                        break
+                    time.sleep(1.5)
+                else:
+                    raise Exception("找不到「保存」按鈕")
+                print("     等待保存完成...")
+                time.sleep(5)
+
+                # 點「列印電子運單」（保存後才出現）
+                print("  → 點「列印電子運單」")
+                sf_page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+                time.sleep(0.5)
+                clicked_print = False
+                for attempt in range(6):
+                    clicked_print = sf_page.evaluate("""() => {
+                        const labels = ['列印電子運單', '打印電子運單'];
+                        for (const el of document.querySelectorAll('button, a, [role="button"], span')) {
+                            if (el.offsetParent === null) continue;
+                            const t = (el.textContent || '').trim();
+                            if (labels.some(l => t === l || t.includes(l))) {
+                                el.click(); return true;
+                            }
+                        }
+                        return false;
+                    }""")
+                    if clicked_print:
+                        print(f"     ✅ 已點列印電子運單 (attempt {attempt+1})")
+                        break
+                    time.sleep(1.5)
 
                 if not clicked_print:
                     print("  ⚠️  找不到列印電子運單按鈕，跳過")
                 else:
-                    print("  ✅ 已點列印電子運單")
                     time.sleep(2.5)
-
-                    # 攔截點「列印面單」後彈出嘅新頁面
                     with ctx.expect_page() as new_page_info:
-                        # 點紅色「列印面單」按鈕
                         sf_page.evaluate("""() => {
                             const labels = ['列印面單', '列印頁面', '打印面單', '打印頁面'];
                             for (const el of document.querySelectorAll('button, a, [role="button"]')) {
