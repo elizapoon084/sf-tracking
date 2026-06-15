@@ -1,6 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { Font, Document, Page, Text, View, StyleSheet as PDFStyleSheet, PDFDownloadLink } from "@react-pdf/renderer";
 import { initializeApp } from "firebase/app";
+import PRODUCTS_LOCAL from '../data/products.json';
+
+// 本地 products.json 品牌對照表（型號 → 品牌），優先於資料庫
+const BRAND_MAP = Object.fromEntries(
+  Object.entries(PRODUCTS_LOCAL).map(([code, p]) => [code, p.brand || ''])
+);
 import { getFirestore, collection, setDoc, deleteDoc, doc, onSnapshot, addDoc, getDoc } from "firebase/firestore";
 
 const firebaseConfig = {
@@ -65,68 +71,103 @@ const DEFAULT_BANNERS = [
 ];
 
 const initialProducts = [
-  { id:"p1",  code:"1000354", name:"夢貝朗一段 (新價格)",             price:105, wholesale:85,  category:"Monbélac",  stock:99, image:"", desc:"" },
-  { id:"p2",  code:"1000356", name:"夢貝朗三段 (新價格)",             price:105, wholesale:85,  category:"Monbélac",  stock:99, image:"", desc:"" },
-  { id:"p3",  code:"1000043", name:"Activitae 瓜拿那",                price:38,  wholesale:30,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p4",  code:"1000044", name:"Activitae 蟻木",                  price:45,  wholesale:36,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p5",  code:"1000046", name:"Activitae 山楂果",                price:38,  wholesale:30,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p6",  code:"1000048", name:"Activitae 雄風寶加強精華版",      price:60,  wholesale:48,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p7",  code:"1000458", name:"Activitae 螺旋藻",                price:45,  wholesale:36,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p8",  code:"1084024", name:"人参灵芝",                        price:45,  wholesale:36,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p9",  code:"1084041", name:"祛濕膏",                          price:20,  wholesale:16,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p10", code:"1084043", name:"健肝寶粉",                        price:34,  wholesale:27,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p11", code:"1084044", name:"紅蔘寶粉",                        price:34,  wholesale:27,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p12", code:"1084059", name:"銀杏舞茸第二代",                  price:50,  wholesale:40,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p13", code:"1084063", name:"Activitae關節寶",                 price:68,  wholesale:54,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p14", code:"1084064", name:"增強免疫力之寶第二代",            price:60,  wholesale:48,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p15", code:"1084065", name:"Activitae女士寶加強版",           price:68,  wholesale:54,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p16", code:"1084066", name:"Activitae嬌妍寶",                 price:33,  wholesale:26,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p17", code:"1084067", name:"Activitae雄風寶加強版",           price:68,  wholesale:54,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p18", code:"1084068", name:"Activitae酵益寶",                 price:40,  wholesale:32,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p19", code:"1084069", name:"Activitae元氣寶",                 price:45,  wholesale:36,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p20", code:"1084071", name:"Enerlab超燃膠囊",                 price:68,  wholesale:54,  category:"ENERLAB",   stock:99, image:"", desc:"" },
-  { id:"p21", code:"1084072", name:"Enerlab超耐力沖飲包",             price:68,  wholesale:54,  category:"ENERLAB",   stock:99, image:"", desc:"" },
-  { id:"p22", code:"1084073", name:"Enerlab超極限能量粉",             price:70,  wholesale:56,  category:"ENERLAB",   stock:99, image:"", desc:"" },
-  { id:"p23", code:"1084074", name:"Enerlab超護心納麴+Q10沖泡粉",    price:50,  wholesale:40,  category:"ENERLAB",   stock:99, image:"", desc:"" },
-  { id:"p24", code:"1084075", name:"Enerlab超平衡祛濕粉",             price:48,  wholesale:38,  category:"ENERLAB",   stock:99, image:"", desc:"" },
-  { id:"p25", code:"1084076", name:"Enerlab超防禦保肝液",             price:48,  wholesale:38,  category:"ENERLAB",   stock:99, image:"", desc:"" },
-  { id:"p26", code:"1084077", name:"Enerlab超益菌沖泡粉",             price:50,  wholesale:40,  category:"ENERLAB",   stock:99, image:"", desc:"" },
-  { id:"p27", code:"1084078", name:"Enerlab超關節沖泡粉",             price:50,  wholesale:40,  category:"ENERLAB",   stock:99, image:"", desc:"" },
-  { id:"p28", code:"1084079", name:"Enerlab超活妍膠原蛋白",           price:48,  wholesale:38,  category:"ENERLAB",   stock:99, image:"", desc:"" },
-  { id:"p29", code:"1084080", name:"Activitae益生菌加強版",           price:38,  wholesale:30,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p30", code:"1084081", name:"Activitae血糖安",                 price:30,  wholesale:24,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p31", code:"1084082", name:"Activitae 納豆紅麴+Q10加強版",   price:55,  wholesale:44,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p32", code:"1084083", name:"Activitae 健肝寶加強版",          price:50,  wholesale:40,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p33", code:"1084084", name:"Activitae 潤肺清喉咽",            price:32,  wholesale:26,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p34", code:"1084085", name:"Activitae 長青護心高鈣脫脂奶粉", price:60,  wholesale:48,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p35", code:"1084086", name:"Activitae 視力寶加強版",          price:30,  wholesale:24,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p36", code:"1084087", name:"Belsante 膠原蛋白美肌粉包第二代",price:48,  wholesale:38,  category:"BELSNTE",   stock:99, image:"", desc:"" },
-  { id:"p37", code:"1084088", name:"Activitae 美白凝凍加強版",        price:38,  wholesale:30,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p38", code:"1084089", name:"Activitae 美莓飲",                price:28,  wholesale:22,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p39", code:"1084090", name:"Activitae 尤加利茶",              price:18,  wholesale:14,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p40", code:"1084091", name:"Activitae 美莓粉包",              price:19,  wholesale:15,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p41", code:"1084092", name:"Activitae 賦活寶加強版",          price:120, wholesale:96,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p42", code:"1084093", name:"Activitae 膠原蛋白",              price:40,  wholesale:32,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p43", code:"1084094", name:"Activitae 睡得寶",                price:50,  wholesale:40,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p44", code:"1084095", name:"Activitae 腸道寶",                price:38,  wholesale:30,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p45", code:"1084096", name:"Activitae 健胃寶",                price:38,  wholesale:30,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p46", code:"1084097", name:"Activitae 活髮寶",                price:32,  wholesale:26,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p47", code:"1084098", name:"Enerlab 超活力冲飲",              price:48,  wholesale:38,  category:"ENERLAB",   stock:99, image:"", desc:"" },
-  { id:"p48", code:"1084099", name:"Activitae雄風寶勁能包",           price:60,  wholesale:48,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p49", code:"1084070", name:"活腦素",                          price:40,  wholesale:32,  category:"Activitae", stock:99, image:"", desc:"" },
-  { id:"p50", code:"1084100", name:"御參元",                          price:40,  wholesale:32,  category:"Activitae", stock:99, image:"", desc:"" },
+  // ── Monbélac ──────────────────────────────────────────────────────────────
+  { id:"p1",  code:"1000354", name:"法國 Monbélac 夢貝朗配方奶粉 1 號",     price:274, wholesale:29,  vip_price:29, material:"奶粉",     spec:"900G",            category:"Monbélac",  stock:99, image:"", desc:"" },
+  { id:"p2",  code:"1000356", name:"法國 Monbélac 夢貝朗配方奶粉 3 號",     price:274, wholesale:29,  vip_price:29, material:"奶粉",     spec:"900G",            category:"Monbélac",  stock:99, image:"", desc:"" },
+  // ── Activitae ─────────────────────────────────────────────────────────────
+  { id:"p3",  code:"1000043", name:"Activitae 瓜拿那",                       price:125, wholesale:13,  vip_price:13, material:"膠囊",     spec:"每盒60粒",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p4",  code:"1000044", name:"Activitae 蟻木",                         price:125, wholesale:13,  vip_price:13, material:"膠囊",     spec:"每盒60粒",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p5",  code:"1000046", name:"Activitae 山楂果",                       price:23,  wholesale:18,  vip_price:0,  material:"",         spec:"",               category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p6",  code:"1000048", name:"Activitae 雄風寶加強精華版",             price:36,  wholesale:29,  vip_price:0,  material:"",         spec:"",               category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p7",  code:"1000458", name:"Activitae 螺旋藻",                       price:148, wholesale:16,  vip_price:16, material:"膠囊",     spec:"每盒60粒",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p8",  code:"1084024", name:"Activitae 人参灵芝",                     price:137, wholesale:14,  vip_price:14, material:"口服液",   spec:"15包x每包15ml",   category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p9",  code:"1084041", name:"Activitae 祛濕膏",                       price:68, wholesale:7,  vip_price:7, material:"啫喱",     spec:"15條/每條10G",    category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p12", code:"1084059", name:"銀杏舞茸第二代",                         price:30,  wholesale:24,  vip_price:0,  material:"",         spec:"",               category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p13", code:"1084063", name:"Activitae關節寶",                        price:131, wholesale:14,  vip_price:14, material:"沖泡粉",   spec:"30包x每包5g",     category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p15", code:"1084065", name:"Activitae女士寶第三代升級版",            price:137, wholesale:14,  vip_price:14, material:"膠囊",     spec:"每盒60粒",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p16", code:"1084066", name:"Activitae嬌妍寶",                        price:103, wholesale:11,  vip_price:11, material:"膠囊",     spec:"每盒30粒",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p17", code:"1084067", name:"Activitae雄風寶加強版",                  price:160, wholesale:17,  vip_price:17, material:"膠囊",     spec:"每盒60粒",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p18", code:"1084068", name:"Activitae酵益寶",                        price:24,  wholesale:19,  vip_price:0,  material:"",         spec:"",               category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p19", code:"1084069", name:"Activitae 元氣寶",                       price:125, wholesale:13,  vip_price:13, material:"膠囊",     spec:"每盒60粒",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p49", code:"1084070", name:"Activitae 活腦營養素",                   price:120, wholesale:13,  vip_price:13, material:"沖泡粉",   spec:"30包x每包3G",     category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p29", code:"1084080", name:"Activitae 益生菌第二代升級版",           price:131, wholesale:14,  vip_price:14, material:"沖泡粉",   spec:"30包x每包3g",     category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p30", code:"1084081", name:"Activitae血糖安",                        price:103, wholesale:11,  vip_price:11, material:"口服液",   spec:"6支x30ML",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p31", code:"1084082", name:"Activitae 納豆紅麴+Q10",                 price:160, wholesale:17,  vip_price:17, material:"膠囊",     spec:"每盒60粒",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p32", code:"1084083", name:"Activitae 健肝寶加強版",                 price:137, wholesale:14,  vip_price:14, material:"口服液",   spec:"20mlx10瓶",       category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p33", code:"1084084", name:"Activitae 潤肺清喉咽",                   price:103, wholesale:11,  vip_price:11, material:"口服液",   spec:"30mlx6瓶",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p34", code:"1084085", name:"Activitae 長青護心高鈣脫脂奶粉",        price:182, wholesale:19,  vip_price:19, material:"沖泡粉",   spec:"30包x每包25g",    category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p35", code:"1084086", name:"Activitae 視力寶加強版",                 price:103, wholesale:11,  vip_price:11, material:"啫喱",     spec:"15包x每包15g",    category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p37", code:"1084088", name:"Activitae 美白凝凍加強版",               price:131, wholesale:14,  vip_price:14, material:"啫喱",     spec:"15條x每條15克",   category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p38", code:"1084089", name:"Activitae 美莓飲",                       price:57,  wholesale:6,  vip_price:6, material:"沖泡粉",   spec:"30包x每包3克",    category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p39", code:"1084090", name:"Activitae 尤加利茶",                     price:63, wholesale:7,  vip_price:7, material:"茶包",     spec:"2克x20包",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p40", code:"1084091", name:"Activitae 美莓粉包",                     price:11,  wholesale:9,  vip_price:0,  material:"",         spec:"",               category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p41", code:"1084092", name:"Activitae 賦活寶加強版",                 price:274, wholesale:29,  vip_price:29, material:"沖泡粉",   spec:"3克x30包",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p42", code:"1084093", name:"Activitae 膠原蛋白",                     price:125, wholesale:13,  vip_price:13, material:"口服液",   spec:"6瓶x30毫升",      category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p43", code:"1084094", name:"Activitae 睡得寶",                       price:125, wholesale:13,  vip_price:13, material:"膠囊",     spec:"每盒60粒",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p44", code:"1084095", name:"Activitae 腸道寶",                       price:171, wholesale:18,  vip_price:18, material:"膠囊",     spec:"每盒30粒",        category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p45", code:"1084096", name:"Activitae 健胃寶",                       price:23,  wholesale:18,  vip_price:0,  material:"",         spec:"",               category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p46", code:"1084097", name:"Activitae 活髮寶",                       price:19,  wholesale:16,  vip_price:0,  material:"",         spec:"",               category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p48", code:"1084099", name:"Activitae雄風寶勁能包",                  price:182, wholesale:19,  vip_price:19, material:"膠囊",     spec:"15包",            category:"Activitae", stock:99, image:"", desc:"" },
+  { id:"p50", code:"1084100", name:"Activitae 御參元",                       price:154, wholesale:16,  vip_price:16, material:"沖泡粉",   spec:"15包x10ml",       category:"Activitae", stock:99, image:"", desc:"" },
+  // ── ENERLAB ───────────────────────────────────────────────────────────────
+  { id:"p20", code:"1084071", name:"Enerlab超燃膠囊",                        price:160, wholesale:17,  vip_price:17, material:"膠囊",     spec:"每盒30粒",        category:"ENERLAB",   stock:99, image:"", desc:"" },
+  { id:"p21", code:"1084072", name:"Enerlab超耐力沖飲包",                    price:160, wholesale:17,  vip_price:17, material:"沖泡粉",   spec:"30包x每包3G",     category:"ENERLAB",   stock:99, image:"", desc:"" },
+  { id:"p22", code:"1084073", name:"Enerlab超極限能量粉",                    price:42,  wholesale:34,  vip_price:0,  material:"",         spec:"",               category:"ENERLAB",   stock:99, image:"", desc:"" },
+  { id:"p23", code:"1084074", name:"Enerlab超護心納麴+Q10沖泡粉",            price:137, wholesale:14,  vip_price:14, material:"沖泡粉",   spec:"30包x每包3G",     category:"ENERLAB",   stock:99, image:"", desc:"" },
+  { id:"p24", code:"1084075", name:"Enerlab超平衡祛濕粉",                    price:68, wholesale:7,  vip_price:7, material:"沖泡粉",   spec:"15包x每包10g",    category:"ENERLAB",   stock:99, image:"", desc:"" },
+  { id:"p25", code:"1084076", name:"Enerlab超防禦保肝液",                    price:29,  wholesale:23,  vip_price:0,  material:"",         spec:"",               category:"ENERLAB",   stock:99, image:"", desc:"" },
+  { id:"p26", code:"1084077", name:"Enerlab超益菌沖泡粉",                    price:103, wholesale:11,  vip_price:11, material:"沖泡粉",   spec:"30包x每包3g",     category:"ENERLAB",   stock:99, image:"", desc:"" },
+  { id:"p27", code:"1084078", name:"Enerlab超關節沖泡粉",                    price:125, wholesale:13,  vip_price:13, material:"沖泡粉",   spec:"30包x每包5g",     category:"ENERLAB",   stock:99, image:"", desc:"" },
+  { id:"p28", code:"1084079", name:"Enerlab超活妍膠原蛋白",                  price:29,  wholesale:23,  vip_price:0,  material:"",         spec:"",               category:"ENERLAB",   stock:99, image:"", desc:"" },
+  { id:"p47", code:"1084098", name:"Enerlab 超活力冲飲",                     price:29,  wholesale:23,  vip_price:0,  material:"",         spec:"",               category:"ENERLAB",   stock:99, image:"", desc:"" },
+  // ── BELSANTE ──────────────────────────────────────────────────────────────
+  { id:"p10", code:"1084043", name:"BELSANTE 健肝寶粉",                      price:114, wholesale:12,  vip_price:12, material:"沖泡粉",   spec:"30包x6ml",        category:"BELSANTE",  stock:99, image:"", desc:"" },
+  { id:"p11", code:"1084044", name:"BELSANTE 紅蔘寶粉",                      price:91, wholesale:10,  vip_price:10, material:"沖泡粉",   spec:"30包x5ml",        category:"BELSANTE",  stock:99, image:"", desc:"" },
+  { id:"p14", code:"1084064", name:"BELSANTE 增強免疫力之寶第二代",          price:148, wholesale:16,  vip_price:16, material:"沖泡粉",   spec:"30包x每包3g",     category:"BELSANTE",  stock:99, image:"", desc:"" },
+  { id:"p36", code:"1084087", name:"Belsante 膠原蛋白美肌粉包第二代",       price:125, wholesale:13,  vip_price:13, material:"沖泡粉",   spec:"30包x每包8g",     category:"BELSANTE",  stock:99, image:"", desc:"" },
+  // ── 護膚品 ────────────────────────────────────────────────────────────────
+  { id:"p51", code:"0300283", name:"SENBEL 強效保濕亮肌面膜",                price:137, wholesale:14,  vip_price:14, material:"面膜",     spec:"50ML",            category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p52", code:"0300416", name:"SENBEL 淨顏柔潤潔面泡沫",                price:125, wholesale:13,  vip_price:13, material:"潔面泡沫", spec:"150ml",           category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p53", code:"0300432", name:"SENBEL 舒緩屏障乳液",                    price:114, wholesale:12,  vip_price:12, material:"乳液",     spec:"200ML",           category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p54", code:"0300523", name:"ESTEBEL 美白卸妝乳",                     price:125, wholesale:13,  vip_price:13, material:"乳液",     spec:"150ML",           category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p55", code:"0300525", name:"ESTEBEL 美白爽膚水",                     price:137, wholesale:14,  vip_price:14, material:"爽膚水",   spec:"100ML",           category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p56", code:"0300614", name:"舒緩潤體霜 RELAXING BODY CREAM",         price:103, wholesale:11,  vip_price:11, material:"潤體霜",   spec:"200ML",           category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p57", code:"0300648", name:"ESTEBEL 強效保濕精華液",                 price:143, wholesale:15,  vip_price:15, material:"精華液",   spec:"30ml",            category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p58", code:"0300270", name:"SENBEL 強效保濕卸妝乳霜",                price:11,  wholesale:11,  vip_price:11, material:"乳霜",     spec:"100ML",           category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p59", code:"0300277", name:"SENBEL 眼唇強效保濕乳",                  price:68, wholesale:7,  vip_price:7, material:"保濕乳",   spec:"25ML",            category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p60", code:"0300616", name:"AUZIERE 清爽身體乳",                     price:12,  wholesale:12,  vip_price:12, material:"乳液",     spec:"250ML",           category:"護膚品",    stock:99, image:"", desc:"" },
+  // ── ED PINAUD ─────────────────────────────────────────────────────────────
+  { id:"p61", code:"0700159", name:"ED PINAUD 妝前絲光泡沫底霜-明亮色",     price:12,  wholesale:12,  vip_price:12, material:"底霜",     spec:"30ml",            category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p62", code:"0700684", name:"ED PINAUD 氣墊保濕粉底",                 price:10,  wholesale:10,  vip_price:10, material:"粉底",     spec:"1盒4G",           category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p63", code:"0700694", name:"ED PINAUD 蜜粉",                         price:10,  wholesale:10,  vip_price:10, material:"蜜粉",     spec:"1盒4G",           category:"護膚品",    stock:99, image:"", desc:"" },
 ];
 
-const CATEGORIES = ["全部", "Activitae", "ENERLAB", "Monbélac", "BELSNTE"];
+// categories is now derived from brands state inside the component
 
 async function saveProductToDb(p)      { await setDoc(doc(db, "products", p.id), p); }
 async function deleteProductFromDb(id) { await deleteDoc(doc(db, "products", id)); }
 async function saveOrderToDb(o)        { return await addDoc(collection(db, "orders"), o); }
-async function saveSettingsToDb(s)     { await setDoc(doc(db, "settings", "main"), s); }
+async function saveSettingsToDb(s)     { await setDoc(doc(db, "settings", "main"), s, { merge: true }); }
+async function forceSyncPrices() {
+  const { getDocs } = await import("firebase/firestore");
+  const snap = await getDocs(collection(db, "products"));
+  const existing = {};
+  snap.forEach(d => { const v = d.data(); if (v.code) existing[v.code] = d.id; });
+  for (const p of initialProducts) {
+    const fid = existing[p.code];
+    if (fid) {
+      const ref = doc(db, "products", fid);
+      await setDoc(ref, { price: p.price, wholesale: p.wholesale, vip_price: p.vip_price }, { merge: true });
+    }
+  }
+}
 async function initProductsInDb() {
   const { getDocs } = await import("firebase/firestore");
   const snap = await getDocs(collection(db, "products"));
-  if (snap.empty) { for (const p of initialProducts) await saveProductToDb(p); }
+  if (snap.size > 0) return;
+  for (const p of initialProducts) {
+    await saveProductToDb(p);
+  }
 }
 
 // ── react-pdf receipt ──────────────────────────────────────────────────────────
@@ -151,6 +192,289 @@ function ReceiptPDFDoc({ order }) {
   const isW = order.priceType === "wholesale";
   return (
     <Document>
+      <Page size={[164, 600]} style={pdfSt.page}>
+        {isW && <Text style={pdfSt.badge}>★ VIP價 VIP PRICE</Text>}
+        <Text style={pdfSt.title}>MANLEE</Text>
+        <Text style={pdfSt.sub}>健康生活店 | Health &amp; Wellness</Text>
+        <Text style={pdfSt.sub}>{STORE_SUB}</Text>
+        <Text style={pdfSt.tiny}>{STORE_ADDR1}</Text>
+        <Text style={pdfSt.tiny}>{STORE_ADDR2}</Text>
+        <Text style={pdfSt.tiny}>{STORE_ADDR3}</Text>
+        <Text style={[pdfSt.tiny, {marginTop:2}]}>{order.orderNo}  |  {order.date}</Text>
+        <View style={pdfSt.divider}/>
+        {order.items.map((item,i)=>(
+          <View key={i} style={pdfSt.row}>
+            <Text style={{flex:3}}>{item.name}</Text>
+            <Text>x{item.qty}  ${(item.price*item.qty).toFixed(2)}</Text>
+          </View>
+        ))}
+        <View style={pdfSt.divider}/>
+        <View style={pdfSt.row}>
+          <Text style={pdfSt.bold}>合計 TOTAL</Text>
+          <Text style={pdfSt.bold}>${order.total.toFixed(2)}</Text>
+        </View>
+        {isW && <Text style={[pdfSt.sub,{marginTop:2}]}>VIP價格 VIP Price</Text>}
+        <View style={pdfSt.divider}/>
+        <Text style={pdfSt.sub}>✦ 謝謝惠顧  Thank You ✦</Text>
+      </Page>
+    </Document>
+  );
+}
+// ──────────────────────────────────────────────────────────────────────────────
+
+// ── Customs Declaration PDF (A4) ──────────────────────────────────────────────
+const customsSt = PDFStyleSheet.create({
+  page:    { padding: "30pt 38pt", fontFamily: "NotoSansSC", fontSize: 8.5 },
+  badge:   { backgroundColor: "#000", color: "#fff", textAlign: "center", paddingVertical: 7, marginBottom: 14, fontSize: 11, fontWeight: "bold" },
+  bigTitle:{ fontSize: 26, fontWeight: "bold", textAlign: "center", letterSpacing: 1, marginBottom: 5 },
+  sub:     { fontSize: 9, color: "#555", textAlign: "center", marginBottom: 3 },
+  addr:    { fontSize: 8, color: "#888", textAlign: "center", marginBottom: 2 },
+  info:    { fontSize: 9.5, marginBottom: 6 },
+  tHead:   { flexDirection: "row", borderTopWidth: 1.2, borderBottomWidth: 1.2, borderColor: "#000", paddingVertical: 7, marginTop: 18 },
+  tRow:    { flexDirection: "row", borderBottomWidth: 0.5, borderColor: "#ccc", paddingVertical: 7, minHeight: 30 },
+  tTotal:  { flexDirection: "row", borderTopWidth: 1.2, borderBottomWidth: 1.2, borderColor: "#000", paddingVertical: 7 },
+  bold:    { fontWeight: "bold" },
+  cell:    { fontSize: 8.5 },
+  c0:      { width: "4%",  textAlign: "center" },
+  c1:      { width: "11%", textAlign: "center" },
+  c_brand: { width: "10%", paddingHorizontal: 3 },
+  c2:      { width: "20%", paddingHorizontal: 3 },
+  c3:      { width: "10%", textAlign: "center" },
+  c4:      { width: "18%", textAlign: "center" },
+  c5:      { width: "11%", textAlign: "right", paddingRight: 3 },
+  c6:      { width: "7%",  textAlign: "center" },
+  c7:      { width: "9%",  textAlign: "right", paddingRight: 3 },
+  footer:  { marginTop: 24, fontSize: 9 },
+});
+
+function CustomsPDFDoc({ order, products }) {
+  const findProd = (code) => (products || []).find(p => p.code === code) || {};
+  return (
+    <Document>
+      <Page size="A4" style={customsSt.page}>
+        {/* Header badge */}
+        <View style={customsSt.badge}><Text>★ VIP價 VIP PRICE</Text></View>
+        {/* Store heading */}
+        <Text style={customsSt.bigTitle}>MANLEE</Text>
+        <Text style={customsSt.sub}>健康生活店 | Health &amp; Wellness</Text>
+        <Text style={customsSt.sub}>{STORE_SUB}</Text>
+        <Text style={customsSt.addr}>{STORE_ADDR1}</Text>
+        <Text style={customsSt.addr}>{STORE_ADDR2}</Text>
+        <Text style={customsSt.addr}>{STORE_ADDR3}</Text>
+        {/* Customer info */}
+        <View style={{marginTop:22,marginBottom:6}}>
+          {order.customerPhone?<Text style={customsSt.info}>聯繫電話：{order.customerPhone}</Text>:null}
+          <Text style={customsSt.info}>訂單編號：{order.orderNo}</Text>
+        </View>
+        {/* Table header */}
+        <View style={customsSt.tHead}>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c0]}>#</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c1]}>型號</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c_brand]}>品牌</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c2]}>商品名稱</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c3]}>材質</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c4]}>規格</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c5]}>VIP 單價</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c6]}>數量</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c7]}>小計</Text>
+        </View>
+        {/* Table rows */}
+        {order.items.map((item,i)=>{
+          const prod=findProd(item.code||"");
+          return (
+            <View key={i} style={customsSt.tRow}>
+              <Text style={[customsSt.cell,customsSt.c0]}>{i+1}</Text>
+              <Text style={[customsSt.cell,customsSt.c1]}>{item.code||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c_brand]}>{BRAND_MAP[item.code]||prod.brand||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c2]}>{item.name}</Text>
+              <Text style={[customsSt.cell,customsSt.c3]}>{prod.material||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c4]}>{prod.spec||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c5]}>${item.price.toFixed(2)}</Text>
+              <Text style={[customsSt.cell,customsSt.c6]}>{item.qty}</Text>
+              <Text style={[customsSt.cell,customsSt.c7]}>${(item.price*item.qty).toFixed(2)}</Text>
+            </View>
+          );
+        })}
+        {/* Total row */}
+        <View style={customsSt.tTotal}>
+          <Text style={[customsSt.cell,{flex:1}]}> </Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c6]}>合計</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c7]}>${order.total.toFixed(2)}</Text>
+        </View>
+        {/* Footer */}
+        <Text style={customsSt.footer}>表格謝謝惠顧 Thank You</Text>
+      </Page>
+    </Document>
+  );
+}
+
+const packingSt = PDFStyleSheet.create({
+  page:    { padding: "36pt 44pt", fontFamily: "NotoSansSC", fontSize: 10 },
+  title:   { fontSize: 22, fontWeight: "bold", textAlign: "center", marginBottom: 4 },
+  sub:     { fontSize: 9, color: "#555", textAlign: "center", marginBottom: 2 },
+  orderNo: { fontSize: 10, fontWeight: "bold", textAlign: "center", marginTop: 14, marginBottom: 18 },
+  tHead:   { flexDirection: "row", borderTopWidth: 1.5, borderBottomWidth: 1.5, borderColor: "#000", paddingVertical: 8, marginBottom: 2 },
+  tRow:    { flexDirection: "row", borderBottomWidth: 0.5, borderColor: "#ddd", paddingVertical: 9, minHeight: 28 },
+  bold:    { fontWeight: "bold" },
+  cell:    { fontSize: 10 },
+  col0:    { width: "7%",  textAlign: "center" },
+  col1:    { width: "20%", paddingHorizontal: 4 },
+  col2:    { width: "53%", paddingHorizontal: 4 },
+  col3:    { width: "20%", textAlign: "center" },
+  footer:  { marginTop: 28, fontSize: 9, color: "#888", textAlign: "center" },
+});
+
+function PackingListPDFDoc({ order }) {
+  return (
+    <Document>
+      <Page size="A4" style={packingSt.page}>
+        <Text style={packingSt.orderNo}>訂單編號：{order.orderNo}</Text>
+        <View style={packingSt.tHead}>
+          <Text style={[packingSt.cell, packingSt.bold, packingSt.col0]}>#</Text>
+          <Text style={[packingSt.cell, packingSt.bold, packingSt.col1]}>產品編號</Text>
+          <Text style={[packingSt.cell, packingSt.bold, packingSt.col2]}>商品名稱</Text>
+          <Text style={[packingSt.cell, packingSt.bold, packingSt.col3]}>數量</Text>
+        </View>
+        {order.items.map((item, i) => (
+          <View key={i} style={packingSt.tRow}>
+            <Text style={[packingSt.cell, packingSt.col0]}>{i + 1}</Text>
+            <Text style={[packingSt.cell, packingSt.col1]}>{item.code || ""}</Text>
+            <Text style={[packingSt.cell, packingSt.col2]}>{item.name}</Text>
+            <Text style={[packingSt.cell, packingSt.col3]}>{item.qty}</Text>
+          </View>
+        ))}
+      </Page>
+    </Document>
+  );
+}
+
+// 合併PDF：第1頁收貨明細 + 第2頁清關
+function CombinedPDFDoc({ order, products }) {
+  const findProd = (code) => (products || []).find(p => p.code === code) || {};
+  return (
+    <Document>
+      {/* Page 1: 收貨明細 */}
+      <Page size="A4" style={packingSt.page}>
+        <Text style={packingSt.orderNo}>訂單編號：{order.orderNo}</Text>
+        <View style={packingSt.tHead}>
+          <Text style={[packingSt.cell, packingSt.bold, packingSt.col0]}>#</Text>
+          <Text style={[packingSt.cell, packingSt.bold, packingSt.col1]}>產品編號</Text>
+          <Text style={[packingSt.cell, packingSt.bold, packingSt.col2]}>商品名稱</Text>
+          <Text style={[packingSt.cell, packingSt.bold, packingSt.col3]}>數量</Text>
+        </View>
+        {order.items.map((item, i) => (
+          <View key={i} style={packingSt.tRow}>
+            <Text style={[packingSt.cell, packingSt.col0]}>{i + 1}</Text>
+            <Text style={[packingSt.cell, packingSt.col1]}>{item.code || ""}</Text>
+            <Text style={[packingSt.cell, packingSt.col2]}>{item.name}</Text>
+            <Text style={[packingSt.cell, packingSt.col3]}>{item.qty}</Text>
+          </View>
+        ))}
+      </Page>
+      {/* Page 2: 清關 */}
+      <Page size="A4" style={customsSt.page}>
+        <View style={customsSt.badge}><Text>★ VIP價 VIP PRICE</Text></View>
+        <Text style={customsSt.bigTitle}>MANLEE</Text>
+        <Text style={customsSt.sub}>健康生活店 | Health &amp; Wellness</Text>
+        <Text style={customsSt.sub}>{STORE_SUB}</Text>
+        <Text style={customsSt.addr}>{STORE_ADDR1}</Text>
+        <Text style={customsSt.addr}>{STORE_ADDR2}</Text>
+        <Text style={customsSt.addr}>{STORE_ADDR3}</Text>
+        <View style={{marginTop:22,marginBottom:6}}>
+          {order.customerPhone?<Text style={customsSt.info}>聯繫電話：{order.customerPhone}</Text>:null}
+          <Text style={customsSt.info}>訂單編號：{order.orderNo}</Text>
+        </View>
+        <View style={customsSt.tHead}>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c0]}>#</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c1]}>型號</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c_brand]}>品牌</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c2]}>商品名稱</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c3]}>材質</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c4]}>規格</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c5]}>VIP 單價</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c6]}>數量</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c7]}>小計</Text>
+        </View>
+        {order.items.map((item,i)=>{
+          const prod=findProd(item.code||"");
+          return (
+            <View key={i} style={customsSt.tRow}>
+              <Text style={[customsSt.cell,customsSt.c0]}>{i+1}</Text>
+              <Text style={[customsSt.cell,customsSt.c1]}>{item.code||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c_brand]}>{BRAND_MAP[item.code]||prod.brand||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c2]}>{item.name}</Text>
+              <Text style={[customsSt.cell,customsSt.c3]}>{prod.material||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c4]}>{prod.spec||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c5]}>${item.price.toFixed(2)}</Text>
+              <Text style={[customsSt.cell,customsSt.c6]}>{item.qty}</Text>
+              <Text style={[customsSt.cell,customsSt.c7]}>${(item.price*item.qty).toFixed(2)}</Text>
+            </View>
+          );
+        })}
+        <View style={customsSt.tTotal}>
+          <Text style={[customsSt.cell,{flex:1}]}> </Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c6]}>合計</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c7]}>${order.total.toFixed(2)}</Text>
+        </View>
+        <Text style={customsSt.footer}>表格謝謝惠顧 Thank You</Text>
+      </Page>
+    </Document>
+  );
+}
+// 全合一PDF：第1頁報關(清關) + 第2頁小票（無明細）
+function AllInOnePDFDoc({ order, products }) {
+  const isW = order.priceType === "wholesale";
+  const findProd = (code) => (products || []).find(p => p.code === code) || {};
+  return (
+    <Document>
+      {/* Page 1: 報關 (清關) */}
+      <Page size="A4" style={customsSt.page}>
+        <View style={customsSt.badge}><Text>★ VIP價 VIP PRICE</Text></View>
+        <Text style={customsSt.bigTitle}>MANLEE</Text>
+        <Text style={customsSt.sub}>健康生活店 | Health &amp; Wellness</Text>
+        <Text style={customsSt.sub}>{STORE_SUB}</Text>
+        <Text style={customsSt.addr}>{STORE_ADDR1}</Text>
+        <Text style={customsSt.addr}>{STORE_ADDR2}</Text>
+        <Text style={customsSt.addr}>{STORE_ADDR3}</Text>
+        <View style={{marginTop:22,marginBottom:6}}>
+          {order.customerPhone?<Text style={customsSt.info}>聯繫電話：{order.customerPhone}</Text>:null}
+          <Text style={customsSt.info}>訂單編號：{order.orderNo}</Text>
+        </View>
+        <View style={customsSt.tHead}>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c0]}>#</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c1]}>型號</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c_brand]}>品牌</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c2]}>商品名稱</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c3]}>材質</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c4]}>規格</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c5]}>VIP 單價</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c6]}>數量</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c7]}>小計</Text>
+        </View>
+        {order.items.map((item,i)=>{
+          const prod=findProd(item.code||"");
+          return (
+            <View key={i} style={customsSt.tRow}>
+              <Text style={[customsSt.cell,customsSt.c0]}>{i+1}</Text>
+              <Text style={[customsSt.cell,customsSt.c1]}>{item.code||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c_brand]}>{BRAND_MAP[item.code]||prod.brand||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c2]}>{item.name}</Text>
+              <Text style={[customsSt.cell,customsSt.c3]}>{prod.material||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c4]}>{prod.spec||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c5]}>${item.price.toFixed(2)}</Text>
+              <Text style={[customsSt.cell,customsSt.c6]}>{item.qty}</Text>
+              <Text style={[customsSt.cell,customsSt.c7]}>${(item.price*item.qty).toFixed(2)}</Text>
+            </View>
+          );
+        })}
+        <View style={customsSt.tTotal}>
+          <Text style={[customsSt.cell,{flex:1}]}> </Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c6]}>合計</Text>
+          <Text style={[customsSt.cell,customsSt.bold,customsSt.c7]}>${order.total.toFixed(2)}</Text>
+        </View>
+        <Text style={customsSt.footer}>謝謝惠顧 Thank You</Text>
+      </Page>
+      {/* Page 2: 小票 */}
       <Page size={[164, 600]} style={pdfSt.page}>
         {isW && <Text style={pdfSt.badge}>★ VIP價 VIP PRICE</Text>}
         <Text style={pdfSt.title}>MANLEE</Text>
@@ -276,7 +600,8 @@ function useIsMobile(){
 
 function ProductImage({image,category,size=64}){
   const[err,setErr]=useState(false);
-  const emoji={Activitae:"🌿",ENERLAB:"⚡","Monbélac":"🍼",BELSNTE:"✨"}[category]||"📦";
+  useEffect(()=>{ setErr(false); },[image]);
+  const emoji={Activitae:"🌿",ENERLAB:"⚡","Monbélac":"🍼",BELSANTE:"✨"}[category]||"📦";
   if(!image||err)return<div style={{width:size,height:size,borderRadius:8,background:"#f0f8f0",display:"flex",alignItems:"center",justifyContent:"center",fontSize:size*0.42}}>{emoji}</div>;
   return<img src={image} alt="" onError={()=>setErr(true)} style={{width:size,height:size,objectFit:"cover",borderRadius:8}}/>;
 }
@@ -504,7 +829,11 @@ export default function App(){
   // Products mgmt
   const[editingProduct,setEditingProduct]=useState(null);
   const[showAddForm,setShowAddForm]=useState(false);
-  const[newProduct,setNewProduct]=useState({code:"",name:"",price:"",wholesale:"",category:"Activitae",stock:"99",image:"",desc:""});
+  const[newProduct,setNewProduct]=useState({code:"",name:"",price:"",wholesale:"",vip_price:"",category:"Activitae",stock:"99",image:"",desc:""});
+  const[brands,setBrands]=useState(["Activitae","ENERLAB","Monbélac","BELSNTE","SENBEL","ED PINAUD"]);
+  const[newBrandInput,setNewBrandInput]=useState("");
+  const[showBrandMgr,setShowBrandMgr]=useState(false);
+  const categories=["全部",...brands];
 
   // Shop (customer)
   const[sfCart,setSfCart]=useState([]);
@@ -544,12 +873,13 @@ export default function App(){
       if(snap.exists()){
         const s=snap.data();
         if(s.banners&&s.banners.length>0){setBanners(s.banners);setLocalBanners(s.banners);}
+        if(s.brands&&s.brands.length>0) setBrands(s.brands);
       }
     });
     return()=>{u1();u2();u3();};
   },[]);
 
-  const getPrice=p=>isWholesale?(p.wholesale||p.price):p.price;
+  const getPrice=p=>isWholesale?(p.vip_price||p.wholesale||p.price):p.price;
   const posTotal=cart.reduce((s,i)=>s+i.usedPrice*i.qty,0);
   const sfTotal=sfCart.reduce((s,i)=>{
     const price=isVIP&&i.wholesale?i.wholesale:i.price;
@@ -568,7 +898,7 @@ export default function App(){
   const updateSfQty=(id,d)=>setSfCart(prev=>prev.map(i=>i.id===id?{...i,qty:i.qty+d}:i).filter(i=>i.qty>0));
 
   const handleConfirm=async()=>{
-    const order={items:cart.map(i=>({...i,price:i.usedPrice})),total:posTotal,date:new Date().toLocaleString("zh-HK"),orderNo:`ORD-${Date.now().toString().slice(-6)}`,source:"pos",customerName:"",customerPhone:"",status:"完成",priceType:isWholesale?"wholesale":"retail"};
+    const order={items:cart.map(i=>({id:i.id,code:i.code,name:i.name,price:i.usedPrice,qty:i.qty,material:i.material||"",spec:i.spec||"",brand:i.brand||"",category:i.category||""})),total:posTotal,date:new Date().toLocaleString("zh-HK"),orderNo:`ORD-${Date.now().toString().slice(-6)}`,source:"pos",customerName:"",customerPhone:"",status:"完成",priceType:isWholesale?"wholesale":"retail"};
     setLastOrder(order);await saveOrderToDb(order);setModal("receipt");
   };
   const handleDone=()=>{setCart([]);setModal(null);};
@@ -605,17 +935,45 @@ export default function App(){
     setSfOrderDone(order);setSfCart([]);setSfCustomer({name:"",phone:"",note:"",address:"",deliveryType:"home",sfLocker:""});setPaymentImg("");setPaymentMethod("payme");setSfModal("done");setSendingOrder(false);
   };
 
-  const saveEdit=async()=>{setSaving(true);await saveProductToDb(editingProduct);setEditingProduct(null);setSaving(false);};
+  const saveEdit=async()=>{
+    setSaving(true);
+    try{
+      const toSave={...editingProduct, wholesale: editingProduct.vip_price||editingProduct.wholesale};
+      await saveProductToDb(toSave);
+      setEditingProduct(null);
+    }catch(err){
+      alert("❌ 儲存失敗："+err.message);
+    }
+    setSaving(false);
+  };
   const addProduct=async()=>{
     if(!newProduct.name||!newProduct.price)return;
     setSaving(true);
-    const p={...newProduct,id:`p${nextIdRef.current++}`,price:parseFloat(newProduct.price)||0,wholesale:parseFloat(newProduct.wholesale)||0,stock:parseInt(newProduct.stock)||99};
+    const p={...newProduct,id:`p${Date.now()}`,price:parseFloat(newProduct.price)||0,wholesale:parseFloat(newProduct.wholesale)||0,vip_price:parseFloat(newProduct.vip_price)||0,stock:parseInt(newProduct.stock)||99};
     await saveProductToDb(p);
-    setNewProduct({code:"",name:"",price:"",wholesale:"",category:"Activitae",stock:"99",image:"",desc:""});setShowAddForm(false);setSaving(false);
+    setNewProduct({code:"",name:"",price:"",wholesale:"",vip_price:"",category:"Activitae",stock:"99",image:"",desc:""});setShowAddForm(false);setSaving(false);
   };
-  const deleteProduct=async id=>{if(!window.confirm("確認刪除？"))return;await deleteProductFromDb(id);};
+  const deleteProduct=async id=>{
+    if(!window.confirm("確認刪除？"))return;
+    try{ await deleteProductFromDb(id); }
+    catch(err){ alert("❌ 刪除失敗："+err.message); }
+  };
   const markOrderDone=async order=>{const{firestoreId,...rest}=order;await setDoc(doc(db,"orders",firestoreId),{...rest,status:"已完成"});};
   const saveBanners=async()=>{await saveSettingsToDb({banners:localBanners});setBanners(localBanners);setEditingBanners(false);};
+  const addBrand=async()=>{
+    const b=newBrandInput.trim();
+    if(!b||brands.includes(b))return;
+    const updated=[...brands,b];
+    setBrands(updated);
+    setNewBrandInput("");
+    await saveSettingsToDb({brands:updated});
+  };
+  const deleteBrand=async(b)=>{
+    if(!window.confirm(`確認刪除品牌「${b}」？`))return;
+    const updated=brands.filter(x=>x!==b);
+    setBrands(updated);
+    await saveSettingsToDb({brands:updated});
+  };
 
   const filtered=products.filter(p=>filterCat==="全部"||p.category===filterCat).filter(p=>!search||p.name.toLowerCase().includes(search.toLowerCase())||p.code.includes(search));
   const sfFiltered=products.filter(p=>sfCat==="全部"||p.category===sfCat).filter(p=>!sfSearch||p.name.toLowerCase().includes(sfSearch.toLowerCase()));
@@ -727,7 +1085,7 @@ export default function App(){
           <div style={{marginBottom:16}}>
             <input value={sfSearch} onChange={e=>setSfSearch(e.target.value)} placeholder="🔍 搜尋商品..." style={{width:"100%",padding:"11px 16px",border:"1.5px solid #cde8cd",borderRadius:24,fontSize:"0.95rem",fontFamily:"Georgia,serif",outline:"none",background:"#fff",boxSizing:"border-box",marginBottom:12}}/>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {CATEGORIES.map(c=><button key={c} onClick={()=>setSfCat(c)} style={{padding:isMobile?"5px 12px":"7px 18px",borderRadius:20,border:"2px solid #cde8cd",background:sfCat===c?dk:"#fff",color:sfCat===c?gn:"#555",cursor:"pointer",fontSize:isMobile?"0.78rem":"0.88rem",fontFamily:"Georgia,serif",fontWeight:sfCat===c?700:400}}>{c}</button>)}
+              {categories.map(c=><button key={c} onClick={()=>setSfCat(c)} style={{padding:isMobile?"5px 12px":"7px 18px",borderRadius:20,border:"2px solid #cde8cd",background:sfCat===c?dk:"#fff",color:sfCat===c?gn:"#555",cursor:"pointer",fontSize:isMobile?"0.78rem":"0.88rem",fontFamily:"Georgia,serif",fontWeight:sfCat===c?700:400}}>{c}</button>)}
             </div>
           </div>
 
@@ -1235,7 +1593,7 @@ export default function App(){
           <div style={{flex:1,display:"flex",flexDirection:"column",gap:10,overflow:isMobile?"visible":"hidden",marginTop:isWholesale?36:0}}>
             <input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔍 搜尋商品名稱或編碼..." style={{padding:"10px 14px",border:"1.5px solid #cde8cd",borderRadius:20,fontSize:"0.9rem",fontFamily:"Georgia,serif",outline:"none",background:"#fff"}}/>
             <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-              {CATEGORIES.map(cat=><button key={cat} onClick={()=>setFilterCat(cat)} style={{padding:"6px 14px",borderRadius:20,border:"2px solid #cde8cd",background:filterCat===cat?dk:"#fff",color:filterCat===cat?gn:"#555",cursor:"pointer",fontSize:"0.82rem",fontFamily:"Georgia,serif",fontWeight:filterCat===cat?700:400}}>{cat}</button>)}
+              {categories.map(cat=><button key={cat} onClick={()=>setFilterCat(cat)} style={{padding:"6px 14px",borderRadius:20,border:"2px solid #cde8cd",background:filterCat===cat?dk:"#fff",color:filterCat===cat?gn:"#555",cursor:"pointer",fontSize:"0.82rem",fontFamily:"Georgia,serif",fontWeight:filterCat===cat?700:400}}>{cat}</button>)}
             </div>
             <div style={{display:"grid",gridTemplateColumns:isMobile?"repeat(3, 1fr)":"repeat(auto-fill, minmax(150px, 1fr))",gap:10,overflowY:isMobile?"visible":"auto",paddingBottom:isMobile?80:8}}>
               {filtered.map(p=>(
@@ -1246,7 +1604,7 @@ export default function App(){
                   {isWholesale?(
                     <div>
                       <div style={{fontSize:"0.72rem",color:"#999",textDecoration:"line-through"}}>${p.price}</div>
-                      <div style={{fontSize:"1rem",color:am,fontWeight:800}}>${p.wholesale||p.price}</div>
+                      <div style={{fontSize:"1rem",color:am,fontWeight:800}}>${p.vip_price||p.wholesale||p.price}</div>
                     </div>
                   ):(
                     <div style={{fontSize:isMobile?"0.88rem":"0.95rem",color:rd,fontWeight:800}}>${p.price}</div>
@@ -1350,6 +1708,9 @@ export default function App(){
                   <div style={{display:"flex",gap:6,marginTop:8,flexWrap:"wrap"}}>
                     <button onClick={()=>setExpandedOrder(expandedOrder===order.orderNo?null:order.orderNo)} style={{padding:"4px 10px",background:"#f0f8f0",color:dk,border:"1px solid #cde8cd",borderRadius:6,cursor:"pointer",fontSize:"0.75rem",fontFamily:"Georgia,serif"}}>{expandedOrder===order.orderNo?"▲ 收起":"▼ 詳情"}</button>
                     <button onClick={()=>printOrder(order)} style={{padding:"4px 10px",background:dk,color:gn,border:"none",borderRadius:6,cursor:"pointer",fontSize:"0.75rem",fontFamily:"Georgia,serif"}}>🖨️ 重印</button>
+                    <PDFDownloadLink document={<CombinedPDFDoc order={order} products={products}/>} fileName={`明細+清關_${order.orderNo}.pdf`} style={{textDecoration:"none"}}>
+                      {({loading})=><button style={{padding:"4px 10px",background:"#1976d2",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontSize:"0.75rem",fontFamily:"Georgia,serif",opacity:loading?0.6:1}}>📋 明細+清關</button>}
+                    </PDFDownloadLink>
                     {order.status==="待處理"&&<button onClick={()=>markOrderDone(order)} style={{padding:"4px 10px",background:"#27ae60",color:"#fff",border:"none",borderRadius:6,cursor:"pointer",fontSize:"0.75rem",fontFamily:"Georgia,serif"}}>✓ 完成</button>}
                   </div>
                   {expandedOrder===order.orderNo&&(
@@ -1376,18 +1737,40 @@ export default function App(){
         <div style={{maxWidth:1100,margin:"0 auto",padding:isMobile?"12px":"20px 18px"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16}}>
             <h2 style={{fontSize:isMobile?"1.1rem":"1.4rem",fontWeight:800}}>商品管理 ({products.length}件)</h2>
-            <button onClick={()=>{setShowAddForm(true);setEditingProduct(null);}} style={{padding:isMobile?"8px 14px":"9px 20px",background:dk,color:gn,border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontFamily:"Georgia,serif"}}>+ 新增</button>
+            <div style={{display:"flex",gap:8}}>
+<button onClick={()=>setShowBrandMgr(v=>!v)} style={{padding:isMobile?"8px 12px":"9px 16px",background:"#f0f8f0",color:dk,border:`1.5px solid ${dk}`,borderRadius:8,cursor:"pointer",fontWeight:700,fontFamily:"Georgia,serif"}}>🏷️ 管理品牌</button>
+              <button onClick={()=>{setShowAddForm(true);setEditingProduct(null);}} style={{padding:isMobile?"8px 14px":"9px 20px",background:dk,color:gn,border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontFamily:"Georgia,serif"}}>+ 新增</button>
+            </div>
           </div>
+          {showBrandMgr&&(
+            <div style={{background:"#fff",borderRadius:12,padding:16,marginBottom:16,boxShadow:"0 4px 16px rgba(0,0,0,0.07)"}}>
+              <div style={{fontWeight:800,marginBottom:12,fontSize:"0.95rem"}}>🏷️ 品牌管理</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:8,marginBottom:12}}>
+                {brands.map(b=>(
+                  <div key={b} style={{display:"flex",alignItems:"center",gap:6,background:"#f0f8f0",border:"1px solid #cde8cd",borderRadius:20,padding:"4px 12px"}}>
+                    <span style={{fontSize:"0.88rem",fontWeight:600}}>{b}</span>
+                    <button onClick={()=>deleteBrand(b)} style={{background:"none",border:"none",cursor:"pointer",color:"#e74c3c",fontWeight:700,fontSize:"0.85rem",lineHeight:1,padding:"0 2px"}}>✕</button>
+                  </div>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <input value={newBrandInput} onChange={e=>setNewBrandInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&addBrand()} placeholder="輸入新品牌名稱" style={{flex:1,padding:"8px 12px",border:"1.5px solid #cde8cd",borderRadius:8,fontSize:"0.9rem",outline:"none"}}/>
+                <button onClick={addBrand} style={{padding:"8px 16px",background:dk,color:gn,border:"none",borderRadius:8,cursor:"pointer",fontWeight:700}}>+ 增加品牌</button>
+              </div>
+            </div>
+          )}
           {showAddForm&&(
             <div style={{background:"#fff",borderRadius:12,padding:20,marginBottom:16,boxShadow:"0 4px 16px rgba(0,0,0,0.07)"}}>
               <h3 style={{fontWeight:800,marginBottom:14}}>新增商品</h3>
               <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
                 <div style={{display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:"0.8rem",fontWeight:700,color:"#666"}}>編碼</label><input value={newProduct.code} onChange={e=>setNewProduct({...newProduct,code:e.target.value})} style={{padding:"8px 11px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.9rem",outline:"none"}} placeholder="1084xxx"/></div>
-                <div style={{display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:"0.8rem",fontWeight:700,color:"#666"}}>品牌</label><select value={newProduct.category} onChange={e=>setNewProduct({...newProduct,category:e.target.value})} style={{padding:"8px 11px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.9rem",outline:"none"}}>{["Activitae","ENERLAB","Monbélac","BELSNTE"].map(c=><option key={c}>{c}</option>)}</select></div>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:"0.8rem",fontWeight:700,color:"#666"}}>品牌</label><select value={newProduct.category} onChange={e=>setNewProduct({...newProduct,category:e.target.value})} style={{padding:"8px 11px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.9rem",outline:"none"}}>{brands.map(c=><option key={c}>{c}</option>)}</select></div>
                 <div style={{gridColumn:"1/-1",display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:"0.8rem",fontWeight:700,color:"#666"}}>名稱 *</label><input value={newProduct.name} onChange={e=>setNewProduct({...newProduct,name:e.target.value})} style={{padding:"8px 11px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.9rem",outline:"none"}} placeholder="商品名稱"/></div>
                 <div style={{display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:"0.8rem",fontWeight:700,color:rd}}>零售價 * ($)</label><input type="number" value={newProduct.price} onChange={e=>setNewProduct({...newProduct,price:e.target.value})} style={{padding:"8px 11px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.9rem",outline:"none"}}/></div>
-                <div style={{display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:"0.8rem",fontWeight:700,color:am}}>VIP價 ($)</label><input type="number" value={newProduct.wholesale} onChange={e=>setNewProduct({...newProduct,wholesale:e.target.value})} style={{padding:"8px 11px",border:`1.5px solid ${am}`,borderRadius:7,fontSize:"0.9rem",outline:"none"}}/></div>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:"0.8rem",fontWeight:700,color:am}}>VIP價 ($)</label><input type="number" value={newProduct.vip_price||""} onChange={e=>setNewProduct({...newProduct,vip_price:e.target.value})} style={{padding:"8px 11px",border:`1.5px solid ${am}`,borderRadius:7,fontSize:"0.9rem",outline:"none"}}/></div>
                 <div style={{gridColumn:"1/-1",display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:"0.8rem",fontWeight:700,color:"#666"}}>產品描述</label><textarea value={newProduct.desc} onChange={e=>setNewProduct({...newProduct,desc:e.target.value})} style={{padding:"8px 11px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.9rem",outline:"none",height:80,resize:"vertical"}} placeholder="功效、成分..."/></div>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:"0.8rem",fontWeight:700,color:"#8B4513"}}>材質 (清關用)</label><input value={newProduct.material||""} onChange={e=>setNewProduct({...newProduct,material:e.target.value})} style={{padding:"8px 11px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.9rem",outline:"none"}} placeholder="如：沖泡粉、膠囊"/></div>
+                <div style={{display:"flex",flexDirection:"column",gap:5}}><label style={{fontSize:"0.8rem",fontWeight:700,color:"#8B4513"}}>規格 (清關用)</label><input value={newProduct.spec||""} onChange={e=>setNewProduct({...newProduct,spec:e.target.value})} style={{padding:"8px 11px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.9rem",outline:"none"}} placeholder="如：30包×每包5g"/></div>
                 <div style={{gridColumn:"1/-1"}}>
                   <label style={{fontSize:"0.8rem",fontWeight:700,color:"#666",display:"block",marginBottom:6}}>相片 ☁️</label>
                   <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -1409,10 +1792,14 @@ export default function App(){
                 {editingProduct?.id===p.id?(
                   <div style={{padding:isMobile?"12px":"14px 20px",borderBottom:"1px solid #f0f8f0",background:"#fffdf7"}}>
                     <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10}}>
+                      <div style={{display:"flex",flexDirection:"column",gap:4}}><label style={{fontSize:"0.78rem",fontWeight:700,color:"#666"}}>品牌</label><select value={editingProduct.category||""} onChange={e=>setEditingProduct({...editingProduct,category:e.target.value})} style={{padding:"7px 10px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.88rem",outline:"none"}}>{brands.map(c=><option key={c}>{c}</option>)}</select></div>
+                      <div style={{display:"flex",flexDirection:"column",gap:4}}><label style={{fontSize:"0.78rem",fontWeight:700,color:"#666"}}>編碼</label><input value={editingProduct.code||""} onChange={e=>setEditingProduct({...editingProduct,code:e.target.value})} style={{padding:"7px 10px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.88rem",outline:"none"}}/></div>
                       <div style={{gridColumn:"1/-1",display:"flex",flexDirection:"column",gap:4}}><label style={{fontSize:"0.78rem",fontWeight:700,color:"#666"}}>名稱</label><input value={editingProduct.name} onChange={e=>setEditingProduct({...editingProduct,name:e.target.value})} style={{padding:"7px 10px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.88rem",outline:"none"}}/></div>
                       <div style={{display:"flex",flexDirection:"column",gap:4}}><label style={{fontSize:"0.78rem",fontWeight:700,color:rd}}>零售價 ($)</label><input type="number" value={editingProduct.price} onChange={e=>setEditingProduct({...editingProduct,price:parseFloat(e.target.value)||0})} style={{padding:"7px 10px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.88rem",outline:"none"}}/></div>
-                      <div style={{display:"flex",flexDirection:"column",gap:4}}><label style={{fontSize:"0.78rem",fontWeight:700,color:am}}>VIP價 ($)</label><input type="number" value={editingProduct.wholesale||""} onChange={e=>setEditingProduct({...editingProduct,wholesale:parseFloat(e.target.value)||0})} style={{padding:"7px 10px",border:`1.5px solid ${am}`,borderRadius:7,fontSize:"0.88rem",outline:"none"}}/></div>
+                      <div style={{display:"flex",flexDirection:"column",gap:4}}><label style={{fontSize:"0.78rem",fontWeight:700,color:am}}>VIP價 ($)</label><input type="number" value={editingProduct.vip_price||""} onChange={e=>setEditingProduct({...editingProduct,vip_price:parseFloat(e.target.value)||0})} style={{padding:"7px 10px",border:`1.5px solid ${am}`,borderRadius:7,fontSize:"0.88rem",outline:"none"}}/></div>
                       <div style={{gridColumn:"1/-1",display:"flex",flexDirection:"column",gap:4}}><label style={{fontSize:"0.78rem",fontWeight:700,color:"#666"}}>產品描述</label><textarea value={editingProduct.desc||""} onChange={e=>setEditingProduct({...editingProduct,desc:e.target.value})} style={{padding:"7px 10px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.88rem",outline:"none",height:80,resize:"vertical"}}/></div>
+                      <div style={{display:"flex",flexDirection:"column",gap:4}}><label style={{fontSize:"0.78rem",fontWeight:700,color:"#8B4513"}}>材質 (清關用)</label><input value={editingProduct.material||""} onChange={e=>setEditingProduct({...editingProduct,material:e.target.value})} style={{padding:"7px 10px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.88rem",outline:"none"}} placeholder="如：沖泡粉"/></div>
+                      <div style={{display:"flex",flexDirection:"column",gap:4}}><label style={{fontSize:"0.78rem",fontWeight:700,color:"#8B4513"}}>規格 (清關用)</label><input value={editingProduct.spec||""} onChange={e=>setEditingProduct({...editingProduct,spec:e.target.value})} style={{padding:"7px 10px",border:"1.5px solid #cde8cd",borderRadius:7,fontSize:"0.88rem",outline:"none"}} placeholder="如：30包×每包5g"/></div>
                       <div style={{gridColumn:"1/-1"}}>
                         <label style={{fontSize:"0.78rem",fontWeight:700,color:"#666",display:"block",marginBottom:6}}>相片 ☁️</label>
                         <div style={{display:"flex",alignItems:"center",gap:10}}>
@@ -1437,7 +1824,7 @@ export default function App(){
                     </div>
                     <div style={{textAlign:"right",flexShrink:0}}>
                       <div style={{color:rd,fontWeight:800,fontSize:"0.9rem"}}>${p.price}</div>
-                      <div style={{color:am,fontWeight:700,fontSize:"0.78rem"}}>批 ${p.wholesale||"-"}</div>
+                      <div style={{color:am,fontWeight:700,fontSize:"0.78rem"}}>VIP ${p.vip_price||"-"}</div>
                     </div>
                     <div style={{display:"flex",gap:6,flexShrink:0}}>
                       <button onClick={()=>{setEditingProduct({...p});setShowAddForm(false);}} style={{padding:"5px 10px",background:"#3498db",color:"#fff",border:"none",borderRadius:5,cursor:"pointer",fontSize:"0.75rem"}}>✏️</button>
@@ -1474,11 +1861,11 @@ export default function App(){
       {modal==="receipt"&&lastOrder&&(
         <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.6)",display:"flex",alignItems:isMobile?"flex-end":"center",justifyContent:"center",zIndex:999}}>
           <div style={{background:"#fff",borderRadius:isMobile?"18px 18px 0 0":14,overflow:"hidden",width:"100%",maxWidth:360}}>
-            <div style={{padding:"10px 16px 6px",borderBottom:"1px solid #edf5ed",display:"flex",justifyContent:"flex-end"}}>
-              <PDFDownloadLink document={<ReceiptPDFDoc order={lastOrder}/>} fileName={`小票_${lastOrder.orderNo}.pdf`} style={{textDecoration:"none"}}>
+            <div style={{padding:"10px 16px 8px",borderBottom:"1px solid #edf5ed",display:"flex",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
+              <PDFDownloadLink document={<AllInOnePDFDoc order={lastOrder} products={products}/>} fileName={`明細+清關_${lastOrder.orderNo}.pdf`} style={{textDecoration:"none"}}>
                 {({loading})=>(
                   <button style={{padding:"7px 18px",background:loading?"#999":"#1565c0",color:"#fff",border:"none",borderRadius:8,cursor:"pointer",fontWeight:700,fontSize:"0.85rem"}}>
-                    {loading?"準備中...":"⬇ DOWNLOAD PDF"}
+                    {loading?"準備中...":"⬇ 小票+明細+清關 (3頁)"}
                   </button>
                 )}
               </PDFDownloadLink>
