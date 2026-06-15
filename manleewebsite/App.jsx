@@ -137,9 +137,9 @@ const initialProducts = [
   { id:"p59", code:"0300277", name:"SENBEL 眼唇強效保濕乳",                  price:68, wholesale:7,  vip_price:7, material:"保濕乳",   spec:"25ML",            category:"護膚品",    stock:99, image:"", desc:"" },
   { id:"p60", code:"0300616", name:"AUZIERE 清爽身體乳",                     price:12,  wholesale:12,  vip_price:12, material:"乳液",     spec:"250ML",           category:"護膚品",    stock:99, image:"", desc:"" },
   // ── ED PINAUD ─────────────────────────────────────────────────────────────
-  { id:"p61", code:"0700159", name:"ED PINAUD 妝前絲光泡沫底霜-明亮色",     price:12,  wholesale:12,  vip_price:12, material:"底霜",     spec:"30ml",            category:"護膚品",    stock:99, image:"", desc:"" },
-  { id:"p62", code:"0700684", name:"ED PINAUD 氣墊保濕粉底",                 price:10,  wholesale:10,  vip_price:10, material:"粉底",     spec:"1盒4G",           category:"護膚品",    stock:99, image:"", desc:"" },
-  { id:"p63", code:"0700694", name:"ED PINAUD 蜜粉",                         price:10,  wholesale:10,  vip_price:10, material:"蜜粉",     spec:"1盒4G",           category:"護膚品",    stock:99, image:"", desc:"" },
+  { id:"p61", code:"0700159", name:"ED PINAUD 妝前絲光泡沫底霜-明亮色",     price:12,  wholesale:12,  vip_price:12, material:"底霜",     spec:"30ml",            category:"護膚品",    brand:"ED PINAUD", stock:99, image:"", desc:"" },
+  { id:"p62", code:"0700684", name:"ED PINAUD 氣墊保濕粉底",                 price:10,  wholesale:10,  vip_price:10, material:"粉底",     spec:"1盒4G",           category:"護膚品",    brand:"ED PINAUD", stock:99, image:"", desc:"" },
+  { id:"p63", code:"0700694", name:"ED PINAUD 蜜粉",                         price:10,  wholesale:10,  vip_price:10, material:"蜜粉",     spec:"1盒4G",           category:"護膚品",    brand:"ED PINAUD", stock:99, image:"", desc:"" },
 ];
 
 // categories is now derived from brands state inside the component
@@ -164,9 +164,13 @@ async function forceSyncPrices() {
 async function initProductsInDb() {
   const { getDocs } = await import("firebase/firestore");
   const snap = await getDocs(collection(db, "products"));
-  if (snap.size > 0) return;
+  if (snap.size === 0) {
+    for (const p of initialProducts) { await saveProductToDb(p); }
+    return;
+  }
+  const existingIds = new Set(snap.docs.map(d => d.id));
   for (const p of initialProducts) {
-    await saveProductToDb(p);
+    if (!existingIds.has(p.id)) { await saveProductToDb(p); }
   }
 }
 
@@ -285,7 +289,7 @@ function CustomsPDFDoc({ order, products }) {
             <View key={i} style={customsSt.tRow}>
               <Text style={[customsSt.cell,customsSt.c0]}>{i+1}</Text>
               <Text style={[customsSt.cell,customsSt.c1]}>{item.code||""}</Text>
-              <Text style={[customsSt.cell,customsSt.c_brand]}>{BRAND_MAP[item.code]||prod.brand||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c_brand]}>{BRAND_MAP[item.code]||prod.brand||item.brand||""}</Text>
               <Text style={[customsSt.cell,customsSt.c2]}>{item.name}</Text>
               <Text style={[customsSt.cell,customsSt.c3]}>{prod.material||""}</Text>
               <Text style={[customsSt.cell,customsSt.c4]}>{prod.spec||""}</Text>
@@ -401,7 +405,7 @@ function CombinedPDFDoc({ order, products }) {
             <View key={i} style={customsSt.tRow}>
               <Text style={[customsSt.cell,customsSt.c0]}>{i+1}</Text>
               <Text style={[customsSt.cell,customsSt.c1]}>{item.code||""}</Text>
-              <Text style={[customsSt.cell,customsSt.c_brand]}>{BRAND_MAP[item.code]||prod.brand||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c_brand]}>{BRAND_MAP[item.code]||prod.brand||item.brand||""}</Text>
               <Text style={[customsSt.cell,customsSt.c2]}>{item.name}</Text>
               <Text style={[customsSt.cell,customsSt.c3]}>{prod.material||""}</Text>
               <Text style={[customsSt.cell,customsSt.c4]}>{prod.spec||""}</Text>
@@ -457,7 +461,7 @@ function AllInOnePDFDoc({ order, products }) {
             <View key={i} style={customsSt.tRow}>
               <Text style={[customsSt.cell,customsSt.c0]}>{i+1}</Text>
               <Text style={[customsSt.cell,customsSt.c1]}>{item.code||""}</Text>
-              <Text style={[customsSt.cell,customsSt.c_brand]}>{BRAND_MAP[item.code]||prod.brand||""}</Text>
+              <Text style={[customsSt.cell,customsSt.c_brand]}>{BRAND_MAP[item.code]||prod.brand||item.brand||""}</Text>
               <Text style={[customsSt.cell,customsSt.c2]}>{item.name}</Text>
               <Text style={[customsSt.cell,customsSt.c3]}>{prod.material||""}</Text>
               <Text style={[customsSt.cell,customsSt.c4]}>{prod.spec||""}</Text>
