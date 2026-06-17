@@ -32,7 +32,8 @@ CHROME_PROFILE  = r"C:\ChromeAutomation"
 ORDERS_DIR      = r"C:\Users\user\Desktop\順丰E順递\data\orders"
 PRODUCTS_JSON   = r"C:\Users\user\Desktop\順丰E順递\data\products.json"
 EXCEL_PATH      = r"C:\Users\user\Desktop\順丰E順递\data\tracking.xlsx"
-BATCH_TEMPLATE  = r"C:\Users\user\Desktop\順丰E順递\批量UPLOAD\寄快遞批量下單模板.xlsx"
+BATCH_TEMPLATE    = r"C:\Users\user\Desktop\順丰E順递\批量UPLOAD\寄快遞批量下單模板.xlsx"
+SF_CONSIGNMENT_XL = r"C:\Users\user\Desktop\順丰E順递\data\sf_consignment_items.xlsx"
 TMP_EXCEL       = r"C:\Users\user\Desktop\順丰E順递\批量UPLOAD\_tmp_v62_batch.xlsx"
 BATCH_HISTORY   = r"C:\Users\user\Desktop\順丰E順递\批量UPLOAD\歷史記錄"
 
@@ -63,6 +64,41 @@ def _load_products():
         return {}
 
 
+def _load_sf_consignment_names() -> set:
+    """載入 SF 托寄物管理的已登記名稱集合（用於批量 Excel 名稱匹配）。"""
+    try:
+        wb = load_workbook(SF_CONSIGNMENT_XL)
+        ws = wb.active
+        names = set()
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if row[0]:
+                names.add(str(row[0]).strip())
+        return names
+    except Exception:
+        return set()
+
+
+def _get_sf_item_name(prod: dict, sf_names: set) -> str:
+    """
+    取貨品的 SF 托寄物名稱：
+    1. 優先用 products.json 的 sf_name 字段（如有）
+    2. 其次看 name 是否在 SF 托寄物清單中（完全符合）
+    3. 否則嘗試模糊匹配（忽略大小寫、首尾空格）
+    4. 都無則用 name 原值
+    """
+    sf_name = prod.get("sf_name", "").strip()
+    if sf_name:
+        return sf_name
+    name = prod.get("name", "").strip()
+    if name in sf_names:
+        return name
+    name_lower = name.lower()
+    for sn in sf_names:
+        if sn.lower() == name_lower:
+            return sn
+    return name
+
+
 def _parse_order(raw: str) -> dict:
     products = _load_products()
     raw = raw.replace("\n", " ").replace("\r", " ")
@@ -81,7 +117,7 @@ def _parse_order(raw: str) -> dict:
         prod = products.get(sku, {})
         items_pos.append({"sku": sku, "qty": qty})
         items_sf.append({
-            "sku": sku, "name": prod.get("name", sku),
+            "sku": sku, "name": prod.get("sf_name") or prod.get("name", sku),
             "unit_price": float(prod.get("vip_price", 0)), "qty": qty,
         })
 
@@ -263,7 +299,11 @@ def generate_batch_excel(orders_with_ids: list, out_path: str):
     """
     orders_with_ids: [(order_dict, pos_order_no), ...]
     生成可上傳到 camp.sf-express.com 的批量 Excel。
+    物品名稱使用 SF 托寄物管理已登記的確切名字。
     """
+    sf_names = _load_sf_consignment_names()
+    products  = _load_products()
+
     shutil.copy2(BATCH_TEMPLATE, out_path)
     wb = load_workbook(out_path)
     ws = wb['運單訊息內容 Order Content']
@@ -304,8 +344,10 @@ def generate_batch_excel(orders_with_ids: list, out_path: str):
                 ws.cell(row, 34, '寄付月結/Pay by Sender (Credit Account)')
                 ws.cell(row, 35, '寄付月結/Pay by Sender (Credit Account)')
                 ws.cell(row, 36, MONTHLY_ACCOUNT)
-            # 物品
-            ws.cell(row, 23, item["name"])
+            # 物品名稱：優先用 SF 托寄物管理的登記名稱
+            prod_info = products.get(item.get("sku", ""), {"name": item["name"]})
+            sf_item_name = _get_sf_item_name(prod_info, sf_names)
+            ws.cell(row, 23, sf_item_name)
             ws.cell(row, 24, 0.1)
             ws.cell(row, 25, item["qty"])
             ws.cell(row, 26, '件/piece')
@@ -349,10 +391,22 @@ def upload_batch_and_get_waybills(page, excel_path: str, orders_with_ids: list) 
             }
         """)
 
+    def _check_and_relogin(pg):
+        """若被重定向到登入頁，提示用戶登入後繼續。"""
+        u = pg.url.lower()
+        if "login" in u or "buac.sf-express.com" in u or "/sign" in u:
+            print("\n⚠️  camp.sf-express.com session 已過期，請在瀏覽器視窗登入帳號")
+            print("   登入完成後，在這裡按 Enter 繼續...")
+            input("   ↩  按 Enter 繼續...")
+            time.sleep(3)
+            return True
+        return False
+
     def _goto_batch_page(pg):
         # Step 1: 去 MonthCard，處理帳號選擇對話框
         pg.goto(CAMP_URL, wait_until="domcontentloaded", timeout=40000)
         time.sleep(4)
+        _check_and_relogin(pg)
         _dismiss(pg)
         clicked = _js_click_confirm(pg)
         if clicked:
@@ -362,16 +416,14 @@ def upload_batch_and_get_waybills(page, excel_path: str, orders_with_ids: list) 
         # Step 2: 直接去批量上傳頁
         pg.goto(CAMP_BATCH_URL, wait_until="domcontentloaded", timeout=40000)
         time.sleep(8)
+        _check_and_relogin(pg)  # 若被重定向到登入頁則暫停
         _dismiss(pg)
-        # 再次處理可能出現的帳號對話框
         if _js_click_confirm(pg):
             time.sleep(4)
-        # 用 JS 確認 file input 在 DOM
         has_input = pg.evaluate("() => !!document.querySelector('input[type=\"file\"]')")
         if has_input:
             print(f"  批量上傳頁已載入（URL={pg.url}）")
             return True
-        # 最後嘗試：多等 10 秒
         print("  等待頁面完全渲染...")
         time.sleep(10)
         has_input = pg.evaluate("() => !!document.querySelector('input[type=\"file\"]')")
@@ -503,6 +555,11 @@ def upload_batch_and_get_waybills(page, excel_path: str, orders_with_ids: list) 
         for i, sf in enumerate(sf_nos):
             if i < len(order_ids):
                 waybill_map[order_ids[i]] = sf
+
+    # 顯示失敗原因
+    fail_list = data.get("failRecordList", [])
+    for rec in fail_list:
+        print(f"  ❌ {rec.get('expressNo','')} 被拒：{rec.get('failReason','未知原因')}（錯誤碼 {rec.get('failCode','')}）")
 
     print(f"  運單號：{waybill_map}")
     return waybill_map, data
@@ -688,9 +745,14 @@ with sync_playwright() as pw:
                 }
             }""")
             pos_page.reload(wait_until="domcontentloaded", timeout=20000)
-            time.sleep(3)
+            time.sleep(5)
 
             # 登入後台
+            try:
+                pos_page.wait_for_selector("button:has-text('后台管理')", timeout=20000)
+            except Exception:
+                pos_page.screenshot(path=os.path.join(ORDERS_DIR, f"_pos_debug_{today}.png"))
+                raise RuntimeError(f"POS 頁面找不到「后台管理」按鈕，截圖：_pos_debug_{today}.png")
             pos_page.locator("button:has-text('后台管理')").first.click(); time.sleep(0.8)
             pos_page.locator("input[type='password']").first.fill(POS_PASS)
             pos_page.keyboard.press("Enter"); time.sleep(1.5)
@@ -882,15 +944,29 @@ with sync_playwright() as pw:
         except Exception:
             sel_text = ""
         if "下載到本地" not in sel_text:
-            pg.locator(".el-select").first.click()
-            time.sleep(1)
-            pg.locator("li.el-select-dropdown__item", has_text="下載到本地").click()
-            time.sleep(1)
+            try:
+                pg.locator(".el-select").first.click()
+                time.sleep(1)
+                pg.locator("li.el-select-dropdown__item", has_text="下載到本地").click(timeout=5000)
+                time.sleep(1)
+            except Exception:
+                pass  # 下拉框操作失敗，繼續嘗試
 
     print("  選擇「下載到本地」...")
     sf_page.goto(CAMP_PRINT_URL, wait_until="domcontentloaded")
     time.sleep(4)
     _dismiss(sf_page)
+    # 偵測 ScanPrint 是否需要重新登入
+    try:
+        page_txt = sf_page.inner_text("body")[:500]
+        if "登入" in page_txt and "掃描" not in page_txt:
+            print("\n⚠️  ScanPrint 需要重新登入，請在瀏覽器登入後按 Enter...")
+            input("   ↩  按 Enter 繼續...")
+            sf_page.goto(CAMP_PRINT_URL, wait_until="domcontentloaded")
+            time.sleep(4)
+            _dismiss(sf_page)
+    except Exception:
+        pass
     _ensure_download_mode(sf_page)
     _dismiss(sf_page)
 
@@ -914,36 +990,73 @@ with sync_playwright() as pw:
         time.sleep(5)  # 等 ScanPrint 系統識別新運單
 
         pdf_saved = False
+        # 「打印失敗」表示 SF 後台還未處理好，需要等待後重載頁面重試
+        scan_retry_waits = [20, 45, 90]  # 每次「打印失敗」後遞增等待秒數
         for attempt in range(3):
             try:
-                _ensure_download_mode(sf_page)  # 確保模式正確、關閉 C-LODOP 彈窗
-                with sf_page.expect_response(
-                    lambda r: "eos-scp-core" in r.url and ".pdf" in r.url,
-                    timeout=40000
-                ) as pdf_resp_info:
-                    sf_page.locator("button", has_text="打印").click()
-                    # 若 C-LODOP 彈窗在打印後出現，立即關閉
-                    time.sleep(1)
-                    _ensure_download_mode(sf_page)
-
-                pdf_bytes = pdf_resp_info.value.body()
-                if len(pdf_bytes) > 1000:
-                    with open(dest_path, "wb") as f:
-                        f.write(pdf_bytes)
-                    c["waybill_pdf"] = dest_path
-                    print(f"  ✅ 已儲存：{dest_path}")
-                    pdf_saved = True
-                    break
-                else:
-                    print(f"  ⚠️  PDF 太小，重試（{attempt+1}/3）...")
-                    time.sleep(5)
-            except Exception as e:
-                print(f"  ⚠️  下載失敗（{attempt+1}/3）：{e}，5 秒後重試...")
                 _ensure_download_mode(sf_page)
-                time.sleep(5)
-                scan_input.click()
-                scan_input.fill(waybill)
-                scan_input.press("Enter")
+                try:
+                    with sf_page.expect_response(
+                        lambda r: "eos-scp-core" in r.url and ".pdf" in r.url,
+                        timeout=25000
+                    ) as pdf_resp_info:
+                        sf_page.locator("button", has_text="打印").click()
+                        time.sleep(2)
+                        _ensure_download_mode(sf_page)
+                    pdf_bytes = pdf_resp_info.value.body()
+                    if len(pdf_bytes) > 1000:
+                        with open(dest_path, "wb") as f:
+                            f.write(pdf_bytes)
+                        c["waybill_pdf"] = dest_path
+                        print(f"  ✅ 已儲存：{dest_path}")
+                        pdf_saved = True
+                        break
+                    else:
+                        print(f"  ⚠️  PDF 太小，重試（{attempt+1}/3）...")
+                        time.sleep(5)
+                except Exception as e:
+                    # 偵測「打印失敗」—— SF 後台還沒處理好，需要等更久再重試
+                    page_fail = False
+                    try:
+                        body_txt = sf_page.inner_text("body", timeout=3000)
+                        page_fail = "打印失敗" in body_txt
+                    except Exception:
+                        pass
+
+                    if page_fail and attempt < 3:
+                        wait_sec = scan_retry_waits[attempt]
+                        print(f"  ⚠️  SF ScanPrint「打印失敗」（運單剛建立，尚未同步），"
+                              f"等 {wait_sec}s 後刷新重試（{attempt+1}/3）...")
+                        time.sleep(wait_sec)
+                        # 重載頁面清除失敗記錄
+                        sf_page.goto(CAMP_PRINT_URL, wait_until="domcontentloaded")
+                        time.sleep(5)
+                        _dismiss(sf_page)
+                        _ensure_download_mode(sf_page)
+                        scan_input = sf_page.locator("input[placeholder='此處為掃描結果']")
+                        scan_input.click()
+                        scan_input.fill(waybill)
+                        scan_input.press("Enter")
+                        time.sleep(8)
+                        continue  # 跳回 for loop 頂部重試
+
+                    print(f"  ⚠️  下載失敗（{attempt+1}/3）：{e}")
+                    ss = os.path.join(ORDERS_DIR, f"_scanprint_fail_{today}_{attempt+1}.png")
+                    try:
+                        sf_page.screenshot(path=ss)
+                        print(f"     截圖：{ss}")
+                    except Exception:
+                        pass
+                    time.sleep(5)
+                    try:
+                        scan_input.click()
+                        scan_input.fill(waybill)
+                        scan_input.press("Enter")
+                        time.sleep(8)
+                    except Exception:
+                        pass
+            except Exception as e:
+                print(f"  ⚠️  意外錯誤（{attempt+1}/3）：{e}")
                 time.sleep(5)
         if not pdf_saved:
             print(f"  ❌ {waybill} 運單 PDF 無法下載，繼續下一張")
