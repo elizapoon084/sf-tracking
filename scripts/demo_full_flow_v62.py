@@ -34,6 +34,7 @@ PRODUCTS_JSON   = r"C:\Users\user\Desktop\順丰E順递\data\products.json"
 EXCEL_PATH      = r"C:\Users\user\Desktop\順丰E順递\data\tracking.xlsx"
 BATCH_TEMPLATE  = r"C:\Users\user\Desktop\順丰E順递\批量UPLOAD\寄快遞批量下單模板.xlsx"
 TMP_EXCEL       = r"C:\Users\user\Desktop\順丰E順递\批量UPLOAD\_tmp_v62_batch.xlsx"
+BATCH_HISTORY   = r"C:\Users\user\Desktop\順丰E順递\批量UPLOAD\歷史記錄"
 
 POS_URL  = "https://online-store-99126206.web.app/"
 POS_PASS = "0000"
@@ -756,6 +757,15 @@ with sync_playwright() as pw:
         print(f"  ⚠️  API 未返回運單號，原始回應：{str(raw_resp)[:300]}")
         print("  請查看截圖確認是否成功，手動記錄運單號")
 
+    # 儲存歷史 Excel（含日期+客人名）
+    os.makedirs(BATCH_HISTORY, exist_ok=True)
+    names_str = "+".join(c["order"]["name"] for c in completed[:4])
+    if len(completed) > 4:
+        names_str += f"+等{len(completed)}人"
+    history_excel = os.path.join(BATCH_HISTORY, f"批量上傳_{today}_{names_str}.xlsx")
+    shutil.copy2(TMP_EXCEL, history_excel)
+    print(f"  📋 Excel 已存檔：{os.path.basename(history_excel)}")
+
     # 配對 waybill 到 completed，並重命名資料夾+PDF（加入 SF 號）
     for c in completed:
         c["waybill"] = waybill_map.get(c["pos_no"], "")
@@ -774,14 +784,24 @@ with sync_playwright() as pw:
                     new_f = os.path.join(new_dir, f"{name}_{today}_{c['pos_no']}_{waybill}_明細+清關.pdf")
                 else:
                     new_f = os.path.join(new_dir, f)
-                for attempt in range(8):
+                moved = False
+                for attempt in range(10):
                     try:
-                        shutil.move(old_f, new_f); break
+                        shutil.move(old_f, new_f); moved = True; break
                     except PermissionError:
                         time.sleep(1.5)
-                else:
+                if not moved:
                     shutil.copy2(old_f, new_f)
-            shutil.rmtree(old_dir, ignore_errors=True)
+                    for attempt in range(10):
+                        try:
+                            os.remove(old_f); break
+                        except PermissionError:
+                            time.sleep(1.5)
+            for attempt in range(10):
+                try:
+                    shutil.rmtree(old_dir); break
+                except Exception:
+                    time.sleep(1.5)
             c["save_dir"] = new_dir
             c["combined_pdf"] = os.path.join(new_dir, f"{name}_{today}_{c['pos_no']}_{waybill}_明細+清關.pdf")
             print(f"  📁 資料夾更新：{os.path.basename(new_dir)}")
@@ -840,13 +860,85 @@ with sync_playwright() as pw:
         time.sleep(1.5)
 
     sf_page.close()
+
+    # ══════════════════════════════════════════════════════════════════════════
+    # 階段四：報關上傳（hk.sf-express.com）
+    # ══════════════════════════════════════════════════════════════════════════
+    print("\n" + "="*60)
+    print("  階段四：報關上傳")
+    print("="*60)
+
+    # 引入 clearance_upload 的函數
+    import importlib.util as _ilu
+    _cl_path = os.path.join(os.path.dirname(__file__), "clearance_upload.py")
+    _cl_spec = _ilu.spec_from_file_location("clearance_upload", _cl_path)
+    _cl_mod  = _ilu.module_from_spec(_cl_spec)
+    _cl_spec.loader.exec_module(_cl_mod)
+
+    CLEARANCE_URL  = "https://hk.sf-express.com/hk/tc/clearance?type=upload"
+    IFRAME_HOST    = "sf-international.com"
+    SESSION_FILE   = r"C:\Users\user\Desktop\順丰E順递\data\last_session.json"
+
+    cl_page = ctx.new_page()
+    sessions_out = []
+
+    for c in completed:
+        if not c.get("waybill"):
+            continue
+        name        = c["order"]["name"]
+        waybill     = c["waybill"]
+        combined    = c.get("combined_pdf", "")
+
+        front, back = _cl_mod.find_id_cards(name)
+        if not front or not os.path.exists(str(front)):
+            print(f"  ⚠️  {name} 找不到身份証正面，跳過報關")
+            continue
+        if not back or not os.path.exists(str(back)):
+            print(f"  ⚠️  {name} 找不到身份証背面，跳過報關")
+            continue
+        if not combined or not os.path.exists(combined):
+            print(f"  ⚠️  {name} 找不到清關PDF，跳過報關")
+            continue
+
+        print(f"\n▶ 報關 {name}  {waybill}")
+        try:
+            frame = _cl_mod._get_iframe(cl_page)
+            frame.locator("input.ant-input").first.fill(waybill)
+            frame.locator("input.ant-input").first.press("Tab")
+            time.sleep(1)
+            print(f"  運單號已填入：{waybill}")
+
+            _cl_mod._do_id_tab(cl_page, frame, front, back, print)
+            _cl_mod._do_customs_tab(cl_page, frame, combined, combined, print)
+            print(f"  ✅ {name} 報關完成")
+
+            sessions_out.append({
+                "customer": name, "waybill": waybill,
+                "pdf_path": c.get("waybill_pdf", ""),
+                "id_uploaded": True, "customs_uploaded": True,
+            })
+        except Exception as e:
+            print(f"  ⚠️  {name} 報關失敗：{e}")
+            sessions_out.append({
+                "customer": name, "waybill": waybill,
+                "pdf_path": c.get("waybill_pdf", ""),
+                "id_uploaded": False, "customs_uploaded": False,
+            })
+
+    # 寫 last_session.json 供補跑用
+    if sessions_out:
+        with open(SESSION_FILE, "w", encoding="utf-8") as f:
+            json.dump(sessions_out, f, ensure_ascii=False, indent=2)
+        print(f"\n  已寫入 last_session.json（{len(sessions_out)} 筆）")
+
+    cl_page.close()
     ctx.close()
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 階段四：記錄 + Git Push
+# 階段五：記錄 + Git Push
 # ══════════════════════════════════════════════════════════════════════════════
 print("\n" + "="*60)
-print("  階段四：記錄 + Git Push")
+print("  階段五：記錄 + Git Push")
 print("="*60)
 
 for c in completed:
