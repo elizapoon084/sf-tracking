@@ -1,17 +1,29 @@
 {
-  "totalCount": 1,
+  "totalCount": 2,
   "successCount": 1,
-  "orderFailCount": 0,
-  "failRecordList": [],
+  "orderFailCount": 1,
+  "failRecordList": [
+    {
+      "id": 212553,
+      "taskId": 167046,
+      "type": 2,
+      "failReason": "托寄物违禁品不可收寄",
+      "number": 3,
+      "expressNo": "ORD-678606",
+      "createTime": "2026-06-17 23:56:05",
+      "updateTime": "2026-06-17 23:56:05",
+      "failCode": "950028"
+    }
+  ],
   "successRecordList": [
     {
-      "id": 2097526,
-      "taskId": 167045,
-      "number": 3,
-      "expressNo": "ORD-285697",
-      "createTime": "2026-06-17 23:48:42",
-      "updateTime": "2026-06-17 23:48:42",
-      "printJson": "{\"expressNo\":\"ORD-285697\",\"subWaybillNoList\":[{\"waybillNo\":\"SF0225939399694\",\"waybillType\":1}],\"masterWaybillNo\":\"SF0225939399694\"}",
+      "id": 2097527,
+      "taskId": 167046,
+      "number": 10,
+      "expressNo": "ORD-729442",
+      "createTime": "2026-06-17 23:56:05",
+      "updateTime": "2026-06-17 23:56:05",
+      "printJson": "{\"expressNo\":\"ORD-729442\",\"subWaybillNoList\":[{\"waybillNo\":\"SF0229939375720\",\"waybillType\":1}],\"masterWaybillNo\":\"SF0229939375720\"}",
       "isCancel": null
     }
   ]

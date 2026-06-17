@@ -866,13 +866,32 @@ with sync_playwright() as pw:
     print("  階段三：下載運單 PDF")
     print("="*60)
 
+    def _ensure_download_mode(pg):
+        """確保列印方式選中「下載到本地」，並關閉 C-LODOP 彈窗。"""
+        # 關閉 C-LODOP 插件提示（點「取消」）
+        try:
+            cancel = pg.locator("button", has_text="取消")
+            if cancel.first.is_visible(timeout=2000):
+                cancel.first.click()
+                time.sleep(1)
+        except Exception:
+            pass
+        # 確認下拉框是否已選「下載到本地」
+        try:
+            sel_text = pg.locator(".el-select").first.inner_text(timeout=3000)
+        except Exception:
+            sel_text = ""
+        if "下載到本地" not in sel_text:
+            pg.locator(".el-select").first.click()
+            time.sleep(1)
+            pg.locator("li.el-select-dropdown__item", has_text="下載到本地").click()
+            time.sleep(1)
+
     print("  選擇「下載到本地」...")
     sf_page.goto(CAMP_PRINT_URL, wait_until="domcontentloaded")
     time.sleep(4)
     _dismiss(sf_page)
-    sf_page.locator(".el-select").first.click(); time.sleep(1)
-    sf_page.locator("li.el-select-dropdown__item", has_text="下載到本地").click()
-    time.sleep(1)
+    _ensure_download_mode(sf_page)
     _dismiss(sf_page)
 
     scan_input = sf_page.locator("input[placeholder='此處為掃描結果']")
@@ -891,27 +910,45 @@ with sync_playwright() as pw:
         _dismiss(sf_page)
         scan_input.click()
         scan_input.fill(waybill)
-        time.sleep(3)  # 等系統確認運單號後才按打印
+        scan_input.press("Enter")  # 觸發運單查詢
+        time.sleep(5)  # 等 ScanPrint 系統識別新運單
 
-        try:
-            with sf_page.expect_response(
-                lambda r: "eos-scp-core" in r.url and ".pdf" in r.url,
-                timeout=25000
-            ) as pdf_resp_info:
-                sf_page.locator("button", has_text="打印").click()
+        pdf_saved = False
+        for attempt in range(3):
+            try:
+                _ensure_download_mode(sf_page)  # 確保模式正確、關閉 C-LODOP 彈窗
+                with sf_page.expect_response(
+                    lambda r: "eos-scp-core" in r.url and ".pdf" in r.url,
+                    timeout=40000
+                ) as pdf_resp_info:
+                    sf_page.locator("button", has_text="打印").click()
+                    # 若 C-LODOP 彈窗在打印後出現，立即關閉
+                    time.sleep(1)
+                    _ensure_download_mode(sf_page)
 
-            pdf_bytes = pdf_resp_info.value.body()
-            if len(pdf_bytes) > 1000:
-                with open(dest_path, "wb") as f:
-                    f.write(pdf_bytes)
-                c["waybill_pdf"] = dest_path
-                print(f"  ✅ 已儲存：{dest_path}")
-            else:
-                print(f"  ⚠️  PDF 太小")
-        except Exception as e:
-            print(f"  ⚠️  下載失敗：{e}")
+                pdf_bytes = pdf_resp_info.value.body()
+                if len(pdf_bytes) > 1000:
+                    with open(dest_path, "wb") as f:
+                        f.write(pdf_bytes)
+                    c["waybill_pdf"] = dest_path
+                    print(f"  ✅ 已儲存：{dest_path}")
+                    pdf_saved = True
+                    break
+                else:
+                    print(f"  ⚠️  PDF 太小，重試（{attempt+1}/3）...")
+                    time.sleep(5)
+            except Exception as e:
+                print(f"  ⚠️  下載失敗（{attempt+1}/3）：{e}，5 秒後重試...")
+                _ensure_download_mode(sf_page)
+                time.sleep(5)
+                scan_input.click()
+                scan_input.fill(waybill)
+                scan_input.press("Enter")
+                time.sleep(5)
+        if not pdf_saved:
+            print(f"  ❌ {waybill} 運單 PDF 無法下載，繼續下一張")
 
-        time.sleep(1.5)
+        time.sleep(2)
 
     sf_page.close()
 
