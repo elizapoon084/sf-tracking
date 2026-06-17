@@ -140,6 +140,7 @@ const initialProducts = [
   { id:"p61", code:"0700159", name:"ED PINAUD 妝前絲光泡沫底霜-明亮色",     price:12,  wholesale:12,  vip_price:12, material:"底霜",     spec:"30ml",            category:"護膚品",    brand:"ED PINAUD", stock:99, image:"", desc:"" },
   { id:"p62", code:"0700684", name:"ED PINAUD 氣墊保濕粉底",                 price:10,  wholesale:10,  vip_price:10, material:"粉底",     spec:"1盒4G",           category:"護膚品",    brand:"ED PINAUD", stock:99, image:"", desc:"" },
   { id:"p63", code:"0700694", name:"ED PINAUD 蜜粉",                         price:10,  wholesale:10,  vip_price:10, material:"蜜粉",     spec:"1盒4G",           category:"護膚品",    brand:"ED PINAUD", stock:99, image:"", desc:"" },
+  { id:"p64", code:"0700685", name:"ED PINAUD 補濕防曬氣墊粉底 SPF30 N°2-米白色", price:10, wholesale:10, vip_price:10, material:"粉底", spec:"1盒4G",           category:"護膚品",    brand:"ED PINAUD", stock:99, image:"", desc:"" },
 ];
 
 // categories is now derived from brands state inside the component
@@ -168,9 +169,15 @@ async function initProductsInDb() {
     for (const p of initialProducts) { await saveProductToDb(p); }
     return;
   }
-  const existingIds = new Set(snap.docs.map(d => d.id));
+  // Build map: code → { docId, brand }
+  const codeMap = {};
+  snap.docs.forEach(d => { const v = d.data(); if (v.code) codeMap[v.code] = { id: d.id, brand: v.brand || "" }; });
   for (const p of initialProducts) {
-    if (!existingIds.has(p.id)) { await saveProductToDb(p); }
+    if (!codeMap[p.code]) {
+      await saveProductToDb(p);                              // 新產品 → 加入
+    } else if (!codeMap[p.code].brand && p.brand) {
+      await setDoc(doc(db, "products", codeMap[p.code].id), { brand: p.brand }, { merge: true }); // 只補 brand
+    }
   }
 }
 

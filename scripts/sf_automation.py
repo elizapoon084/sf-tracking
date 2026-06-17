@@ -194,7 +194,7 @@ def _add_one_item(page: Page, item: dict) -> None:
 
     _js_fill_by_label(page, "品牌", item.get("brand", ""))
     page.wait_for_timeout(2000)
-    _js_fill_by_label(page, "材質", item.get("material", ""))
+    _js_fill_by_label(page, "用途", item.get("material", ""))
     page.wait_for_timeout(2000)
     _js_fill_by_label(page, "規格型號", item.get("spec", ""))
     page.wait_for_timeout(2000)

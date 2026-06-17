@@ -98,9 +98,14 @@ def _parse_order(raw: str) -> dict:
     else:
         remainder = raw[last_end:].strip().lstrip("，,、—- \t")
         nm2 = re.match(r"([^\s\d，,、]{1,10})\s+", remainder)
-        if not nm2:
-            raise ValueError("找唔到收件人名 — 請在電話前加上姓名")
-        name = nm2.group(1).strip("，,、 \t")
+        if nm2:
+            name = nm2.group(1).strip("，,、 \t")
+        else:
+            # 處理名字直接跟電話（無空格）：秦华菊17157894610
+            nm3 = re.match(r"([^\d\s，,、]{1,10})(?=1[3-9]\d{9}|[2-9]\d{7})", remainder)
+            if not nm3:
+                raise ValueError("找唔到收件人名 — 請在電話前加上姓名")
+            name = nm3.group(1).strip("，,、 \t")
 
     m = re.search(r"1[3-9]\d{9}|[2-9]\d{7}", raw)
     if not m:
@@ -639,21 +644,21 @@ def js_fill_by_label(page, label, value):
 
 def smart_fill(page, text, which):
     page.locator("span:has-text('智慧填寫')").nth(which).click()
+    time.sleep(1.5)  # 等對話框出現
+    # textarea 在 intel-address-intelAddrInput label 內
+    ta = page.locator(
+        "[class*='intel-address-intelAddrInput'] textarea,"
+        "[class*='intelAddress__'] textarea,"
+        "[role='dialog'] textarea"
+    ).first
+    ta.wait_for(state="visible", timeout=8000)
+    ta.fill(text)  # fill() 自動清除現有內容再填入
     time.sleep(0.8)
-    ta = page.locator("textarea[class*='intelAddr'], textarea[placeholder*='陳先生']").first
-    ta.wait_for(state="visible", timeout=5000)
-    ta.click()
-    ta.type(text, delay=20)
-    time.sleep(0.5)
-    page.evaluate("""() => {
-        for (const el of document.querySelectorAll('*')) {
-            if (el.childNodes.length===1 && el.firstChild.nodeType===3
-                && el.firstChild.textContent.trim()==='識別') {
-                el.click(); return;
-            }
-        }
-    }""")
-    time.sleep(2.5)
+    # div[role=button] 需要 Playwright force click 才能正確觸發 React 滑鼠事件
+    btn = page.locator("[data-state='open'] [class*='confirmBtn']").first
+    btn.wait_for(state="visible", timeout=5000)
+    btn.click(force=True)
+    time.sleep(10)  # 等識別完成及地址欄位填入
 
 
 def download_pos_word(ctx, pos_order_no, save_dir, customer_name):
@@ -1061,7 +1066,15 @@ with sync_playwright() as pw:
 
                 print("\n▶ Step 7: 開啟順豐寄件頁面")
                 sf_page = ctx.new_page()
-                sf_page.goto(SF_URL, wait_until="domcontentloaded", timeout=20000)
+                for _sf_attempt in range(3):
+                    try:
+                        sf_page.goto(SF_URL, wait_until="domcontentloaded", timeout=60000)
+                        break
+                    except Exception as _sf_err:
+                        if _sf_attempt == 2:
+                            raise
+                        print(f"  ⚠️  SF 頁面載入失敗，重試 ({_sf_attempt+2}/3)... ({_sf_err})")
+                        time.sleep(5)
                 time.sleep(3)
 
                 print("\n▶ Step 8: 寄件人 → 自寄")
@@ -1132,7 +1145,8 @@ with sync_playwright() as pw:
                         print("  ❌ 搵唔到 +新增物品")
                         break
                     sf_page.mouse.click(click_info["x"], click_info["y"])
-                    time.sleep(2)
+                    # 等 10 秒讓 dialog 完全載入
+                    time.sleep(10)
                     # v4: 等 dialog 入面 input 真係 visible，確保 dialog 完全 render 完
                     try:
                         sf_page.locator('[role="dialog"][data-state="open"] input').first.wait_for(state="visible", timeout=6000)
@@ -1149,35 +1163,130 @@ with sync_playwright() as pw:
                             }
                         }
                     }""")
-                    time.sleep(1.5)
+                    # 選完「物品」後等 10 秒，讓表單完全渲染出 物品名稱 欄位
+                    time.sleep(10)
 
                     js_fill_by_label(sf_page, "物品名稱", item["name"])
                     sf_page.keyboard.press("Tab")
-                    time.sleep(5)
+                    # 填完物品名稱後等 10 秒，讓系統動態載入品牌/材質/規格等欄位
+                    time.sleep(10)
                     print("  ✅ 物品名稱")
 
-                    js_fill_by_label(sf_page, "品牌", item["brand"]); time.sleep(2)
-                    print("  ✅ 品牌")
-                    # 材質欄位：順豐可能叫「材質」或「物品材質」
-                    mat_filled = False
-                    for mat_label in ["材質", "物品材質"]:
-                        if js_fill_by_label(sf_page, mat_label, item["material"]):
-                            mat_filled = True
+                    # ── 等待某個 label 旁邊的 input 出現（使用同 js_fill_by_label 相同邏輯）──
+                    def _wait_label_input(lbl, timeout_sec=30):
+                        for _ in range(timeout_sec * 2):
+                            ok = sf_page.evaluate("""(lbl) => {
+                                const targets = [lbl, lbl + '：', lbl + ':'];
+                                const dialog = document.querySelector('[role="dialog"][data-state="open"]');
+                                const root = dialog || document;
+                                for (const el of root.querySelectorAll('*')) {
+                                    if (el.offsetParent === null) continue;
+                                    const t = el.textContent.trim();
+                                    if (!targets.includes(t) && !(t.length < 12 && t.includes(lbl))) continue;
+                                    let p = el.parentElement;
+                                    for (let d = 0; d < 5; d++) {
+                                        if (!p) break;
+                                        for (const inp of p.querySelectorAll('input:not([type=hidden])')) {
+                                            if (inp.offsetParent === null) continue;
+                                            const r = inp.getBoundingClientRect();
+                                            if (r.width > 0 && r.height > 0) return true;
+                                        }
+                                        p = p.parentElement;
+                                    }
+                                }
+                                return false;
+                            }""", lbl)
+                            if ok:
+                                return True
+                            time.sleep(0.5)
+                        return False
+
+                    # ── 用 React native setter 強制更新狀態（keyboard.type 不夠）──────
+                    def _react_fill(lbl, val):
+                        val_str = str(val).replace("\\", "\\\\").replace("'", "\\'")
+                        return sf_page.evaluate("""(args) => {
+                            const [lbl, val] = args;
+                            const targets = [lbl, lbl + '：', lbl + ':'];
+                            const dialog = document.querySelector('[role="dialog"][data-state="open"]');
+                            const root = dialog || document;
+                            const lblEls = [];
+                            for (const el of root.querySelectorAll('*')) {
+                                if (el.offsetParent === null) continue;
+                                const t = el.textContent.trim();
+                                if (targets.includes(t) || (t.length < 12 && t.includes(lbl))) lblEls.push(el);
+                            }
+                            lblEls.sort((a,b) => a.children.length - b.children.length);
+                            for (const le of lblEls) {
+                                let p = le.parentElement;
+                                for (let d = 0; d < 5; d++) {
+                                    if (!p) break;
+                                    for (const inp of p.querySelectorAll('input:not([type=hidden]):not([type=radio]):not([type=checkbox])')) {
+                                        if (inp.offsetParent === null) continue;
+                                        const r = inp.getBoundingClientRect();
+                                        if (r.width === 0 || r.height === 0) continue;
+                                        inp.focus();
+                                        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+                                        setter.call(inp, val);
+                                        inp.dispatchEvent(new Event('input',  {bubbles:true}));
+                                        inp.dispatchEvent(new Event('change', {bubbles:true}));
+                                        return inp.value;
+                                    }
+                                    p = p.parentElement;
+                                }
+                            }
+                            return null;
+                        }""", [lbl, val_str])
+
+                    # ── 品牌：等欄出現 → keyboard fill → react setter 雙保險 ──────
+                    _brand_visible = _wait_label_input("品牌", timeout_sec=30)
+                    if not _brand_visible:
+                        print("  ⚠️  等待「品牌」欄超時，強制繼續")
+                    brand_ok = False
+                    for _retry in range(3):
+                        js_fill_by_label(sf_page, "品牌", item["brand"])
+                        time.sleep(0.5)
+                        if _react_fill("品牌", item["brand"]):
+                            brand_ok = True
                             break
-                    if not mat_filled:
+                        time.sleep(1.5)
+                    if brand_ok:
+                        print("  ✅ 品牌")
+                    else:
+                        print("  ⚠️  品牌填寫失敗，繼續")
+                    time.sleep(1)
+
+                    # ── 材質：先試「材質」再試「用途」，同樣雙保險 ──────────────────
+                    mat_filled = False
+                    for mat_label in ["材質", "用途", "物品材質"]:
+                        if not _wait_label_input(mat_label, timeout_sec=10):
+                            continue
+                        for _retry in range(3):
+                            js_fill_by_label(sf_page, mat_label, item["material"])
+                            time.sleep(0.5)
+                            if _react_fill(mat_label, item["material"]):
+                                mat_filled = True
+                                break
+                            time.sleep(1.5)
+                        if mat_filled:
+                            break
+                    if mat_filled:
+                        print("  ✅ 材質")
+                    else:
                         print("  ⚠️  材質欄位搵唔到，跳過")
-                    time.sleep(2)
-                    print("  ✅ 材質")
                     # 規格欄位：順豐可能叫「規格型號」、「規格」或「型號」
                     spec_filled = False
                     for spec_label in ["規格型號", "規格", "型號"]:
-                        if js_fill_by_label(sf_page, spec_label, item["spec"]):
+                        if not _wait_label_input(spec_label, timeout_sec=8):
+                            continue
+                        js_fill_by_label(sf_page, spec_label, item["spec"])
+                        time.sleep(0.5)
+                        if _react_fill(spec_label, item["spec"]):
                             spec_filled = True
                             break
-                    if not spec_filled:
+                    if spec_filled:
+                        print("  ✅ 規格")
+                    else:
                         print("  ⚠️  規格欄位搵唔到，跳過")
-                    time.sleep(2)
-                    print("  ✅ 規格")
 
                     # 原產地 → 台灣
                     # Dialog 裡有3個 combobox（港幣/個/原產地），最後一個係原產地
@@ -1221,19 +1330,32 @@ with sync_playwright() as pw:
                         print("  ⚠️  原產地下拉選單搵唔到，跳過")
 
                     js_fill_by_label(sf_page, "物品單價", item["unit_price"]); time.sleep(0.5)
+                    _react_fill("物品單價", item["unit_price"])
                     print("  ✅ 單價")
                     js_fill_by_label(sf_page, "物品數量", item["qty"]); time.sleep(0.5)
+                    _react_fill("物品數量", item["qty"])
                     print("  ✅ 數量")
 
-                    sf_page.evaluate("""() => {
-                        for (const el of document.querySelectorAll('[class*="package-declaration_confirm"]')) {
-                            if (el.offsetParent===null) continue;
-                            if (el.textContent.trim()!=='確認') continue;
-                            const r = el.getBoundingClientRect();
-                            if (r.width<30||r.height<15) continue;
-                            el.click(); return;
-                        }
-                    }""")
+                    # 按紅色確認按鈕（scroll 入視野先）
+                    time.sleep(1)
+                    confirmed = False
+                    for _ca in range(5):
+                        confirmed = sf_page.evaluate("""() => {
+                            for (const el of document.querySelectorAll('[class*="package-declaration_confirm"]')) {
+                                if (el.offsetParent===null) continue;
+                                const t = el.textContent.trim();
+                                if (t !== '確認') continue;
+                                el.scrollIntoView({block:'center'});
+                                el.click();
+                                return true;
+                            }
+                            return false;
+                        }""")
+                        if confirmed:
+                            break
+                        time.sleep(1.5)
+                    if not confirmed:
+                        print("  ⚠️  找不到確認按鈕")
                     time.sleep(2)
                     wait_dialog_closed(sf_page)
                     print("  ✅ 已確認")
@@ -1388,23 +1510,31 @@ with sync_playwright() as pw:
 
                 waybill = "未擷取"
                 submit_result = {}
-                for attempt in range(8):
+                _btn_pos = None
+                for attempt in range(10):
                     submit_result = sf_page.evaluate("""() => {
-                        for (const el of document.querySelectorAll('[class*="submitBtn"]')) {
-                            if (el.offsetParent===null) continue;
-                            if (!el.textContent.trim().includes('下單')) continue;
-                            const cls=(el.className||'').toString();
-                            if (cls.includes('disabled')) return {ok:false,reason:'disabled'};
-                            const r=el.getBoundingClientRect();
-                            if (r.width<40) continue;
-                            el.click();
-                            return {ok:true};
+                        const sels = ['[class*="submitBtn"]','[class*="submit-btn"]',
+                                      '[class*="submitButton"]','[class*="submit_btn"]'];
+                        for (const sel of sels) {
+                            for (const el of document.querySelectorAll(sel)) {
+                                if (el.offsetParent===null) continue;
+                                if (!el.textContent.trim().includes('下單')) continue;
+                                const cls=(el.className||'').toString();
+                                const r=el.getBoundingClientRect();
+                                if (r.width<40) continue;
+                                if (cls.includes('disabled'))
+                                    return {ok:false,reason:'disabled',x:r.left+r.width/2,y:r.top+r.height/2};
+                                el.click();
+                                return {ok:true};
+                            }
                         }
                         for (const el of document.querySelectorAll('[role="button"]')) {
                             if (el.offsetParent===null) continue;
                             if (el.textContent.trim()!=='下單') continue;
                             const cls=(el.className||'').toString();
-                            if (cls.includes('disabled')) return {ok:false,reason:'role_disabled'};
+                            const r=el.getBoundingClientRect();
+                            if (cls.includes('disabled'))
+                                return {ok:false,reason:'role_disabled',x:r.left+r.width/2,y:r.top+r.height/2};
                             el.click();
                             return {ok:true};
                         }
@@ -1412,13 +1542,38 @@ with sync_playwright() as pw:
                     }""")
                     if submit_result.get("ok"):
                         print(f"  ✅ 下單成功 (attempt {attempt+1})")
-                        # v4: 等系統 load 確認頁，確保申報值已正確記錄
                         print("  ⏳ 等系統處理下單...")
                         time.sleep(5)
                         break
-                    time.sleep(2)
+                    if submit_result.get("x"):
+                        _btn_pos = (submit_result["x"], submit_result["y"])
+                    reason = submit_result.get("reason", "")
+                    print(f"  ⚠️  下單按鈕 {reason} (attempt {attempt+1}/10)，等 4 秒...")
+                    time.sleep(4)
                 else:
-                    print(f"  ❌ 下單失敗: {submit_result}")
+                    if _btn_pos:
+                        print("  ⚠️  強制滑鼠點擊下單按鈕...")
+                        sf_page.mouse.click(_btn_pos[0], _btn_pos[1])
+                        time.sleep(6)
+                        _url = sf_page.url
+                        if "complete" in _url or "confirm" in _url:
+                            print("  ✅ 強制點擊後已跳至確認頁")
+                        else:
+                            _errs = sf_page.evaluate("""() => {
+                                const msgs = [];
+                                for (const el of document.querySelectorAll(
+                                    '[class*="error"],[class*="Error"],[class*="invalid"],[class*="required"]')) {
+                                    if (el.offsetParent===null) continue;
+                                    const t=(el.textContent||'').trim();
+                                    if (t.length>0 && t.length<80) msgs.push(t);
+                                }
+                                return [...new Set(msgs)].slice(0,10);
+                            }""")
+                            if _errs:
+                                print(f"  ❌ 表單錯誤提示：{_errs}")
+                            print(f"  ❌ 下單失敗: {submit_result}")
+                    else:
+                        print(f"  ❌ 下單失敗（找不到按鈕）: {submit_result}")
 
                 time.sleep(3)
                 shot(sf_page, f"{order_idx+1:02d}_04_sf_submitted")
@@ -1481,48 +1636,69 @@ with sync_playwright() as pw:
                         print("  ⚠️  找不到列印電子運單按鈕，跳過")
                     else:
                         print("  ✅ 已點列印電子運單")
-                        time.sleep(2.5)
+                        # 等 modal 完全載入（原 2.5 秒太短）
+                        time.sleep(8)
 
-                        # 攔截點「列印面單」後彈出嘅新頁面
-                        waybill_pdf_name = f"{DEMO_CUSTOMER}_{today}_{pos_order_no}_{waybill}_運單.pdf"
-                        waybill_pdf_path = os.path.join(save_dir, waybill_pdf_name)
-
-                        with ctx.expect_page() as new_page_info:
-                            # 點紅色「列印面單」按鈕
-                            sf_page.evaluate("""() => {
-                                const labels = ['列印面單', '列印頁面', '打印面單', '打印頁面'];
-                                for (const el of document.querySelectorAll('button, a, [role="button"]')) {
+                        # 確認「列印面單」按鈕在 modal 內已出現，最多等 20 秒
+                        _print_btn_ready = False
+                        for _pw in range(20):
+                            _has = sf_page.evaluate("""() => {
+                                const labels = ['列印面單','列印頁面','打印面單','打印頁面'];
+                                for (const el of document.querySelectorAll('button,a,[role="button"]')) {
                                     if (el.offsetParent === null) continue;
                                     const t = (el.textContent || '').trim();
-                                    if (labels.some(l => t === l || t.includes(l))) {
-                                        el.click(); return true;
-                                    }
+                                    if (labels.some(l => t === l || t.includes(l))) return true;
                                 }
                                 return false;
                             }""")
+                            if _has:
+                                _print_btn_ready = True
+                                break
+                            time.sleep(1)
 
-                        print_page = new_page_info.value
-                        print_page.wait_for_load_state("networkidle", timeout=10000)
-                        time.sleep(1.5)
+                        if not _print_btn_ready:
+                            print("  ⚠️  等待「列印面單」按鈕超時，跳過列印")
+                        else:
+                            # 攔截點「列印面單」後彈出嘅新頁面
+                            waybill_pdf_name = f"{DEMO_CUSTOMER}_{today}_{pos_order_no}_{waybill}_運單.pdf"
+                            waybill_pdf_path = os.path.join(save_dir, waybill_pdf_name)
 
-                        # 用 CDP 儲存列印頁面為 PDF
-                        import base64 as _b64
-                        cdp = ctx.new_cdp_session(print_page)
-                        result = cdp.send("Page.printToPDF", {
-                            "printBackground": True,
-                            "paperWidth":  8.27,
-                            "paperHeight": 11.69,
-                            "marginTop":    0.2,
-                            "marginBottom": 0.2,
-                            "marginLeft":   0.2,
-                            "marginRight":  0.2,
-                        })
-                        pdf_data = _b64.b64decode(result["data"])
-                        with open(waybill_pdf_path, "wb") as f:
-                            f.write(pdf_data)
-                        cdp.detach()
-                        print_page.close()
-                        print(f"  ✅ 電子運單已儲存: {waybill_pdf_path}")
+                            with ctx.expect_page(timeout=30000) as new_page_info:
+                                # 點紅色「列印面單」按鈕
+                                sf_page.evaluate("""() => {
+                                    const labels = ['列印面單', '列印頁面', '打印面單', '打印頁面'];
+                                    for (const el of document.querySelectorAll('button, a, [role="button"]')) {
+                                        if (el.offsetParent === null) continue;
+                                        const t = (el.textContent || '').trim();
+                                        if (labels.some(l => t === l || t.includes(l))) {
+                                            el.click(); return true;
+                                        }
+                                    }
+                                    return false;
+                                }""")
+
+                            print_page = new_page_info.value
+                            print_page.wait_for_load_state("domcontentloaded", timeout=30000)
+                            time.sleep(3)
+
+                            # 用 CDP 儲存列印頁面為 PDF
+                            import base64 as _b64
+                            cdp = ctx.new_cdp_session(print_page)
+                            result = cdp.send("Page.printToPDF", {
+                                "printBackground": True,
+                                "paperWidth":  8.27,
+                                "paperHeight": 11.69,
+                                "marginTop":    0.2,
+                                "marginBottom": 0.2,
+                                "marginLeft":   0.2,
+                                "marginRight":  0.2,
+                            })
+                            pdf_data = _b64.b64decode(result["data"])
+                            with open(waybill_pdf_path, "wb") as f:
+                                f.write(pdf_data)
+                            cdp.detach()
+                            print_page.close()
+                            print(f"  ✅ 電子運單已儲存: {waybill_pdf_path}")
 
                 except Exception as e:
                     print(f"  ⚠️  列印電子運單失敗: {e}")
@@ -1649,6 +1825,8 @@ with sync_playwright() as pw:
     # ── 自動清關上傳（v6 瀏覽器關閉後直接跑 clearance_upload.py）────────────
     # 必須先關閉 v6 瀏覽器，clearance_upload 才能開啟同一個 Chrome profile
     ctx.close()
+    print("  等待 Chrome profile 完全釋放（8 秒）...")
+    time.sleep(8)
 
     import subprocess as _sp, sys as _sys
     _cl_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'clearance_upload.py')

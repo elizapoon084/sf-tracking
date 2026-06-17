@@ -6,6 +6,8 @@
 import os
 import sys
 import json
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
 import time
 import threading
 import tkinter as tk
@@ -37,6 +39,11 @@ _S2T = {
     '艺':'藝','联':'聯','绿':'綠','银':'銀','编':'編','铭':'銘',
     '秀':'秀','春':'春','梅':'梅','燕':'燕','芳':'芳','娜':'娜',
     '俊':'俊','峰':'峰','珊':'珊','婷':'婷','蕾':'蕾',
+    # 補充缺少的字
+    '蔼':'藹','荣':'榮','宁':'寧','义':'義','风':'風','时':'時',
+    '丰':'豐','务':'務','带':'帶','层':'層','变':'變','话':'話',
+    '进':'進','问':'問','间':'間','关':'關','开':'開','电':'電',
+    '头':'頭','经':'經','给':'給','绕':'繞','总':'總','设':'設',
 }
 _T2S = {v: k for k, v in _S2T.items()}
 
@@ -283,10 +290,60 @@ class ClearanceApp:
 def _get_iframe(page):
     """Return the sf-international iframe frame after the upload tab is clicked."""
     page.goto(CLEARANCE_URL, wait_until='domcontentloaded', timeout=30000)
-    time.sleep(2)
-    page.click('button:has-text("清關證件圖片上傳")')
-    time.sleep(3)
-    return next(fr for fr in page.frames if IFRAME_HOST in fr.url)
+    time.sleep(5)
+
+    # 偵測是否被重定向到登入頁
+    cur_url = page.url
+    if 'login' in cur_url.lower() or 'sign' in cur_url.lower():
+        raise Exception(
+            f"SF 網站未登入！已跳轉到：{cur_url}\n"
+            "請用 Chrome 開啟 C:\\ChromeAutomation 配置檔手動登入 SF HK 網站，再重跑程式。"
+        )
+
+    # 點擊「清關證件圖片上傳」Tab（不是 button，是 tab 標籤）
+    _btn_labels = [
+        '清關證件圖片上傳', '清关证件图片上传',
+        '清關上傳', '清關單証上傳', '上傳', '证照',
+    ]
+    clicked = False
+    for _lbl in _btn_labels:
+        try:
+            page.click(f'text={_lbl}', timeout=4000)
+            clicked = True
+            break
+        except Exception:
+            continue
+    if not clicked:
+        # 印出頁面所有可見文字幫助排查
+        try:
+            visible = page.evaluate("() => document.body.innerText.slice(0, 500)")
+            print(f"  [debug] 頁面可見文字(前500): {visible}")
+        except Exception:
+            pass
+
+    # 等 iframe 載入，最多 25 秒重試
+    for _attempt in range(25):
+        for fr in page.frames:
+            if IFRAME_HOST in fr.url:
+                return fr
+        time.sleep(1)
+
+    # 截圖儲存以便排查
+    _ss_path = os.path.join(os.path.dirname(SESSION_FILE), 'clearance_debug.png')
+    try:
+        page.screenshot(path=_ss_path)
+        print(f"  [debug] 截圖已儲存: {_ss_path}")
+        print(f"  [debug] 當前 URL: {page.url}")
+        print(f"  [debug] 所有 frames: {[f.url for f in page.frames]}")
+    except Exception:
+        pass
+
+    raise Exception(
+        f"找不到 {IFRAME_HOST} iframe（清關頁面未正確載入）\n"
+        "最可能原因：SF HK 網站 session 過期，需要重新登入。\n"
+        f"截圖已儲存到: {_ss_path}\n"
+        "請打開 Chrome（使用 C:\\ChromeAutomation 配置），登入 https://hk.sf-express.com/ 後再試。"
+    )
 
 
 def _upload_via_chooser(page, frame, css_area: str, filepath: str, label: str, log_fn):
@@ -365,7 +422,7 @@ def _handle_confirm_modal(page, frame, log_fn):
             frame.wait_for_selector('.ant-modal-wrap', state='hidden', timeout=8000)
         except Exception:
             time.sleep(2)
-        time.sleep(3)
+        time.sleep(3)  # 按同意後等 3 秒才進下一步
     except Exception:
         pass   # no modal = nothing to do
 

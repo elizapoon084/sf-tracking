@@ -1,0 +1,28 @@
+{
+  "totalCount": 2,
+  "successCount": 2,
+  "orderFailCount": 0,
+  "failRecordList": [],
+  "successRecordList": [
+    {
+      "id": 2097465,
+      "taskId": 167036,
+      "number": 3,
+      "expressNo": "ORD-489606",
+      "createTime": "2026-06-17 20:32:37",
+      "updateTime": "2026-06-17 20:32:37",
+      "printJson": "{\"expressNo\":\"ORD-489606\",\"subWaybillNoList\":[{\"waybillNo\":\"SF5197697973780\",\"waybillType\":1}],\"masterWaybillNo\":\"SF5197697973780\"}",
+      "isCancel": null
+    },
+    {
+      "id": 2097464,
+      "taskId": 167036,
+      "number": 12,
+      "expressNo": "ORD-531846",
+      "createTime": "2026-06-17 20:32:37",
+      "updateTime": "2026-06-17 20:32:37",
+      "printJson": "{\"expressNo\":\"ORD-531846\",\"subWaybillNoList\":[{\"waybillNo\":\"SF5197697973726\",\"waybillType\":1}],\"masterWaybillNo\":\"SF5197697973726\"}",
+      "isCancel": null
+    }
+  ]
+}

@@ -1,0 +1,484 @@
+{
+  "1000043": {
+    "name": "Activitae 瓜拿那",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "每盒60粒",
+    "vip_price": 22
+  },
+  "1000044": {
+    "name": "Activitae 蟻木",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "每盒60粒",
+    "vip_price": 22
+  },
+  "1000046": {
+    "name": "Enerlab超護心納麴+Q10沖泡粉",
+    "brand": "Enerlab",
+    "material": "沖泡粉",
+    "spec": "30包",
+    "vip_price": 24
+  },
+  "1000354": {
+    "name": "法國 Monbélac 夢貝朗配方奶粉 1 號",
+    "brand": "Monbélac",
+    "material": "奶粉",
+    "spec": "900G",
+    "vip_price": 48
+  },
+  "1000356": {
+    "name": "法國 Monbélac 夢貝朗配方奶粉 3 號",
+    "brand": "Monbélac",
+    "material": "奶粉",
+    "spec": "900G",
+    "vip_price": 48
+  },
+  "1000458": {
+    "name": "Activitae 螺旋藻",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "每盒60粒",
+    "vip_price": 26
+  },
+  "1084024": {
+    "name": "Activitae 人参灵芝",
+    "brand": "Activitae",
+    "material": "口服液",
+    "spec": "15包x每包15ml",
+    "vip_price": 24
+  },
+  "1084041": {
+    "name": "Activitae 祛濕膏",
+    "brand": "Activitae",
+    "material": "啫喱",
+    "spec": "15條/每條10G",
+    "vip_price": 12
+  },
+  "1084043": {
+    "name": "BELSANTE 健肝寶粉",
+    "brand": "BELSANTE",
+    "material": "沖泡粉",
+    "spec": "30包x6ml",
+    "vip_price": 20
+  },
+  "1084044": {
+    "name": "BELSANTE 紅蔘寶粉",
+    "brand": "BELSANTE",
+    "material": "沖泡粉",
+    "spec": "30包x5ml",
+    "vip_price": 16
+  },
+  "1084063": {
+    "name": "Activitae關節寶",
+    "brand": "Activitae",
+    "material": "沖泡粉",
+    "spec": "30包x每包5g",
+    "vip_price": 23
+  },
+  "1084064": {
+    "name": "BELSANTE 增強免疫力之寶第二代",
+    "brand": "BELSANTE",
+    "material": "沖泡粉",
+    "spec": "30包x每包3g",
+    "vip_price": 26
+  },
+  "1084065": {
+    "name": "Activitae女士寶第三代升級版",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "每盒60粒",
+    "vip_price": 24
+  },
+  "1084066": {
+    "name": "Activitae嬌妍寶",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "每盒30粒",
+    "vip_price": 18
+  },
+  "1084067": {
+    "name": "Activitae雄風寶加強版",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "每盒60粒",
+    "vip_price": 28
+  },
+  "1084069": {
+    "name": "Activitae 元氣寶",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "每盒60粒",
+    "vip_price": 22
+  },
+  "1084070": {
+    "name": "Activitae 活腦營養素",
+    "brand": "Activitae",
+    "material": "沖泡粉",
+    "spec": "30包x每包3G",
+    "vip_price": 21
+  },
+  "1084071": {
+    "name": "Enerlab超燃膠囊",
+    "brand": "Enerlab",
+    "material": "膠囊",
+    "spec": "每盒30粒",
+    "vip_price": 28
+  },
+  "1084072": {
+    "name": "Enerlab超耐力沖飲包",
+    "brand": "Enerlab",
+    "material": "沖泡粉",
+    "spec": "30包x每包3G",
+    "vip_price": 28
+  },
+  "1084074": {
+    "name": "Enerlab超護心納麴+Q10沖泡粉",
+    "brand": "Enerlab",
+    "material": "沖泡粉",
+    "spec": "30包x每包3G",
+    "vip_price": 24
+  },
+  "1084075": {
+    "name": "Enerlab超平衡祛濕粉",
+    "brand": "Enerlab",
+    "material": "沖泡粉",
+    "spec": "15包x每包10g",
+    "vip_price": 12
+  },
+  "1084077": {
+    "name": "Enerlab超益菌沖泡粉",
+    "brand": "Enerlab",
+    "material": "沖泡粉",
+    "spec": "30包x每包3g",
+    "vip_price": 18
+  },
+  "1084078": {
+    "name": "Enerlab超關節沖泡粉",
+    "brand": "Enerlab",
+    "material": "沖泡粉",
+    "spec": "30包x每包5g",
+    "vip_price": 22
+  },
+  "1084080": {
+    "name": "Activitae 益生菌第二代升級版",
+    "brand": "Activitae",
+    "material": "沖泡粉",
+    "spec": "30包x每包3g",
+    "vip_price": 23
+  },
+  "1084081": {
+    "name": "Activitae血糖安",
+    "brand": "Activitae",
+    "material": "口服液",
+    "spec": "6支x30ML",
+    "vip_price": 18
+  },
+  "1084082": {
+    "name": "Activitae 納豆紅麴+Q10",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "每盒60粒",
+    "vip_price": 28
+  },
+  "1084083": {
+    "name": "Activitae 健肝寶加強版",
+    "brand": "Activitae",
+    "material": "口服液",
+    "spec": "20mlx10瓶",
+    "vip_price": 24
+  },
+  "1084084": {
+    "name": "Activitae 潤肺清喉咽",
+    "brand": "Activitae",
+    "material": "口服液",
+    "spec": "30mlx6瓶",
+    "vip_price": 18
+  },
+  "1084085": {
+    "name": "Activitae 長青護心高鈣脫脂奶粉",
+    "brand": "Activitae",
+    "material": "沖泡粉",
+    "spec": "30包x每包25g",
+    "vip_price": 32
+  },
+  "1084086": {
+    "name": "Activitae 視力寶加強版",
+    "brand": "Activitae",
+    "material": "啫喱",
+    "spec": "15包x每包15g",
+    "vip_price": 18
+  },
+  "1084087": {
+    "name": "Belsante 膠原蛋白美肌粉包第二代",
+    "brand": "BELSANTE",
+    "material": "沖泡粉",
+    "spec": "30包x每包8g",
+    "vip_price": 22
+  },
+  "1084088": {
+    "name": "Activitae 美白凝凍加強版",
+    "brand": "Activitae",
+    "material": "啫喱",
+    "spec": "15條x每條15克",
+    "vip_price": 23
+  },
+  "1084089": {
+    "name": "Activitae 美莓飲",
+    "brand": "Activitae",
+    "material": "沖泡粉",
+    "spec": "30包x每包3克",
+    "vip_price": 10
+  },
+  "1084090": {
+    "name": "Activitae 尤加利茶",
+    "brand": "Activitae",
+    "material": "茶包",
+    "spec": "2克x20包",
+    "vip_price": 11
+  },
+  "1084092": {
+    "name": "Activitae 賦活寶加強版",
+    "brand": "Activitae",
+    "material": "沖泡粉",
+    "spec": "3克x30包",
+    "vip_price": 48
+  },
+  "1084093": {
+    "name": "Activitae 膠原蛋白",
+    "brand": "Activitae",
+    "material": "口服液",
+    "spec": "6瓶x30毫升",
+    "vip_price": 22
+  },
+  "1084094": {
+    "name": "Activitae 睡得寶",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "每盒60粒",
+    "vip_price": 22
+  },
+  "1084095": {
+    "name": "Activitae 腸道寶",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "每盒30粒",
+    "vip_price": 30
+  },
+  "1084099": {
+    "name": "Activitae雄風寶勁能包",
+    "brand": "Activitae",
+    "material": "膠囊",
+    "spec": "15包",
+    "vip_price": 32
+  },
+  "1084100": {
+    "name": "Activitae 御參元",
+    "brand": "Activitae",
+    "material": "沖泡粉",
+    "spec": "15包x10ml",
+    "vip_price": 27
+  },
+  "1084110": {
+    "name": "Activitae 活彩蔬纖飲",
+    "brand": "Activitae",
+    "material": "沖泡粉",
+    "spec": "15包x12g",
+    "vip_price": 20
+  },
+  "0100345": {
+    "name": "ESTEBEL 第六靈感 插牆式薰香器 第二代 黄色",
+    "brand": "ESTEBEL",
+    "material": "薰香器",
+    "model": "0100345",
+    "spec": "0100345",
+    "origin": "台灣",
+    "vip_price": 28
+  },
+  "0100346": {
+    "name": "ESTEBEL 第六靈感 插牆式薰香器 第二代 紫色",
+    "brand": "ESTEBEL",
+    "material": "薰香器",
+    "model": "0100346",
+    "spec": "0100346",
+    "origin": "台灣",
+    "vip_price": 28
+  },
+  "0300270": {
+    "name": "SENBEL 強效保濕卸妝乳霜",
+    "brand": "SENBEL",
+    "material": "乳霜",
+    "spec": "100ML",
+    "vip_price": 18
+  },
+  "0300277": {
+    "name": "SENBEL 眼唇強效保濕乳",
+    "brand": "SENBEL",
+    "material": "保濕乳",
+    "spec": "25ML",
+    "vip_price": 12
+  },
+  "0300283": {
+    "name": "SENBEL 強效保濕亮肌面膜",
+    "brand": "SENBEL",
+    "material": "面膜",
+    "spec": "50ML",
+    "vip_price": 24
+  },
+  "0300416": {
+    "name": "SENBEL 淨顏柔潤潔面泡沫",
+    "brand": "SENBEL",
+    "material": "潔面泡沫",
+    "spec": "150ML",
+    "vip_price": 22
+  },
+  "0300423": {
+    "name": "SENBEL 淨化爽膚水",
+    "brand": "SENBEL",
+    "material": "爽膚水",
+    "spec": "100ML",
+    "vip_price": 16
+  },
+  "0300427": {
+    "name": "SENBEL 淨化排毒面膜",
+    "brand": "SENBEL",
+    "material": "面膜",
+    "spec": "100ML",
+    "vip_price": 18
+  },
+  "0300432": {
+    "name": "SENBEL 舒緩屏障乳液",
+    "brand": "SENBEL",
+    "material": "乳液",
+    "spec": "200ML",
+    "vip_price": 20
+  },
+  "0300523": {
+    "name": "ESTEBEL 美白卸妝乳",
+    "brand": "ESTEBEL",
+    "material": "乳液",
+    "spec": "150ML",
+    "vip_price": 22
+  },
+  "0300525": {
+    "name": "ESTEBEL 美白爽膚水",
+    "brand": "ESTEBEL",
+    "material": "爽膚水",
+    "spec": "100ML",
+    "vip_price": 24
+  },
+  "0300530": {
+    "name": "SENBEL 柔和泡沫潔面乳",
+    "brand": "SENBEL",
+    "material": "潔面乳",
+    "spec": "150ML",
+    "vip_price": 18
+  },
+  "0300614": {
+    "name": "舒緩潤體霜 RELAXING BODY CREAM",
+    "brand": "AUZIERE",
+    "material": "潤體霜",
+    "spec": "200ML",
+    "vip_price": 18
+  },
+  "0300616": {
+    "name": "AUZIERE 清爽身體乳",
+    "brand": "AUZIERE",
+    "material": "乳液",
+    "spec": "250ML",
+    "vip_price": 20
+  },
+  "0300648": {
+    "name": "ESTEBEL 強效保濕精華液",
+    "brand": "ESTEBEL",
+    "material": "精華液",
+    "spec": "30 ml",
+    "vip_price": 25
+  },
+  "0300405": {
+    "name": "SENBEL 保濕精華面膜",
+    "brand": "SENBEL",
+    "material": "面膜",
+    "spec": "每盒5片",
+    "vip_price": 10
+  },
+  "0300442": {
+    "name": "SENBEL 再注氧潔面啫喱",
+    "brand": "SENBEL",
+    "material": "啫喱",
+    "spec": "150ML",
+    "vip_price": 12
+  },
+  "0300534": {
+    "name": "ESTEBEL 水潤保濕日霜",
+    "brand": "ESTEBEL",
+    "material": "日霜",
+    "spec": "75ML",
+    "vip_price": 15
+  },
+  "0300535": {
+    "name": "ESTEBEL 賦活再生晚霜",
+    "brand": "ESTEBEL",
+    "material": "晚霜",
+    "spec": "75ML",
+    "vip_price": 18
+  },
+  "0300410": {
+    "name": "SENBEL 舒緩精華面膜",
+    "brand": "SENBEL",
+    "material": "面膜",
+    "spec": "1盒5片",
+    "vip_price": 10
+  },
+  "0100777": {
+    "name": "Scento-B 禪的韻律 超聲波霧化薰香器-白色",
+    "brand": "Scento-B",
+    "material": "薰香器",
+    "model": "0100777",
+    "spec": "0100777",
+    "origin": "台灣",
+    "vip_price": 25
+  },
+  "0100433": {
+    "name": "Scento-B香珠薰香塊(中號)-奇幻辛香",
+    "brand": "Scento-B",
+    "material": "薰香塊",
+    "spec": "1套5件",
+    "vip_price": 5
+  },
+  "0100434": {
+    "name": "Scento-B香珠薰香塊(中號)-歡樂的擁抱",
+    "brand": "Scento-B",
+    "material": "薰香塊",
+    "spec": "1套5件",
+    "vip_price": 5
+  },
+  "0300406": {
+    "name": "SENBEL 滋潤精華面膜",
+    "brand": "SENBEL",
+    "material": "面膜",
+    "spec": "1盒5片",
+    "vip_price": 6
+  },
+  "0300408": {
+    "name": "SENBEL 緊緻精華面膜",
+    "brand": "SENBEL",
+    "material": "面膜",
+    "spec": "1盒5片",
+    "vip_price": 6
+  },
+  "0300407": {
+    "name": "SENBEL 美白精華面膜",
+    "brand": "SENBEL",
+    "material": "面膜",
+    "spec": "1盒5片",
+    "vip_price": 6
+  },
+  "0300409": {
+    "name": "SENBEL 淨膚精華面膜",
+    "brand": "SENBEL",
+    "material": "面膜",
+    "spec": "1盒5片",
+    "vip_price": 6
+  }
+}

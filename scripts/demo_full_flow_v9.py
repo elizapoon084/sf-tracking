@@ -1604,11 +1604,12 @@ with sync_playwright() as pw:
     _SESSION_FILE = r"C:\Users\user\Desktop\順丰E順递\data\last_session.json"
     _session = []
     for c, w, p in completed_orders:
-        # p 係小票路徑（{customer}_{date}_{pos_no}.pdf）
-        # 運單 PDF 路徑係 {customer}_{date}_{pos_no}_{waybill}_運單.pdf
+        # p 可能係合一PDF路徑（含_明細+清關）或舊小票路徑，需先還原 file_base
         _receipt_dir  = os.path.dirname(p)
-        _receipt_base = os.path.basename(p).replace(".pdf", "")
-        _waybill_pdf  = os.path.join(_receipt_dir, f"{_receipt_base}_{w}_運單.pdf")
+        _raw_base     = os.path.basename(p).replace(".pdf", "")
+        # 去掉 _明細+清關 suffix（AllInOne 流程），還原純 file_base
+        _file_base    = _raw_base.split("_明細+清關")[0] if "_明細+清關" in _raw_base else _raw_base
+        _waybill_pdf  = os.path.join(_receipt_dir, f"{_file_base}_{w}_運單.pdf")
         _session.append({"customer": c, "waybill": w, "pdf_path": _waybill_pdf})
     try:
         os.makedirs(os.path.dirname(_SESSION_FILE), exist_ok=True)
