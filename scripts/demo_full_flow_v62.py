@@ -977,32 +977,64 @@ with sync_playwright() as pw:
         time.sleep(5)  # 等 ScanPrint 系統識別新運單
 
         pdf_saved = False
-        # 「打印失敗」表示 SF 後台還未處理好，需要等待後重載頁面重試
-        scan_retry_waits = [20, 45, 90]  # 每次「打印失敗」後遞增等待秒數
+        # SF「下載到本地」會把 PDF 開在新分頁（blob: URL），需用 expect_popup 捕捉
+        scan_retry_waits = [20, 45, 90]
         for attempt in range(3):
             try:
                 _ensure_download_mode(sf_page)
                 try:
-                    with sf_page.expect_response(
-                        lambda r: "eos-scp-core" in r.url and ".pdf" in r.url,
-                        timeout=25000
-                    ) as pdf_resp_info:
+                    with sf_page.expect_popup(timeout=25000) as popup_info:
                         sf_page.locator("button", has_text="打印").click()
                         time.sleep(2)
                         _ensure_download_mode(sf_page)
-                    pdf_bytes = pdf_resp_info.value.body()
-                    if len(pdf_bytes) > 1000:
-                        with open(dest_path, "wb") as f:
-                            f.write(pdf_bytes)
-                        c["waybill_pdf"] = dest_path
-                        print(f"  ✅ 已儲存：{dest_path}")
-                        pdf_saved = True
-                        break
+
+                    popup_page = popup_info.value
+                    blob_url = popup_page.url
+                    time.sleep(2)
+
+                    if blob_url.startswith("blob:"):
+                        # 用原 SF 頁面（同 origin）fetch blob 並轉 base64
+                        safe_url = blob_url.replace("'", "")
+                        pdf_b64 = sf_page.evaluate(f"""
+                            async () => {{
+                                const r = await fetch('{safe_url}');
+                                const ab = await r.arrayBuffer();
+                                const u8 = new Uint8Array(ab);
+                                const chunks = [];
+                                for (let i = 0; i < u8.length; i += 8192) {{
+                                    chunks.push(String.fromCharCode(
+                                        ...u8.subarray(i, Math.min(i + 8192, u8.length))
+                                    ));
+                                }}
+                                return btoa(chunks.join(''));
+                            }}
+                        """)
+                        try:
+                            popup_page.close()
+                        except Exception:
+                            pass
+                        import base64 as _b64
+                        pdf_bytes = _b64.b64decode(pdf_b64)
+                        if len(pdf_bytes) > 1000:
+                            with open(dest_path, "wb") as f:
+                                f.write(pdf_bytes)
+                            c["waybill_pdf"] = dest_path
+                            print(f"  ✅ 已儲存：{dest_path}")
+                            pdf_saved = True
+                            break
+                        else:
+                            print(f"  ⚠️  PDF 太小，重試（{attempt+1}/3）...")
+                            time.sleep(5)
                     else:
-                        print(f"  ⚠️  PDF 太小，重試（{attempt+1}/3）...")
+                        print(f"  ⚠️  非預期 popup URL：{blob_url[:80]}")
+                        try:
+                            popup_page.close()
+                        except Exception:
+                            pass
                         time.sleep(5)
+
                 except Exception as e:
-                    # 偵測「打印失敗」—— SF 後台還沒處理好，需要等更久再重試
+                    # 偵測「打印失敗」—— SF 後台還沒同步，需等待後刷新重試
                     page_fail = False
                     try:
                         body_txt = sf_page.inner_text("body", timeout=3000)
@@ -1015,7 +1047,6 @@ with sync_playwright() as pw:
                         print(f"  ⚠️  SF ScanPrint「打印失敗」（運單剛建立，尚未同步），"
                               f"等 {wait_sec}s 後刷新重試（{attempt+1}/3）...")
                         time.sleep(wait_sec)
-                        # 重載頁面清除失敗記錄
                         sf_page.goto(CAMP_PRINT_URL, wait_until="domcontentloaded")
                         time.sleep(5)
                         _dismiss(sf_page)
@@ -1025,7 +1056,7 @@ with sync_playwright() as pw:
                         scan_input.fill(waybill)
                         scan_input.press("Enter")
                         time.sleep(8)
-                        continue  # 跳回 for loop 頂部重試
+                        continue
 
                     print(f"  ⚠️  下載失敗（{attempt+1}/3）：{e}")
                     ss = os.path.join(ORDERS_DIR, f"_scanprint_fail_{today}_{attempt+1}.png")
