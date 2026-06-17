@@ -846,19 +846,6 @@ with sync_playwright() as pw:
                 dl_info.value.save_as(combined_path)
                 print(f"  ✅ PDF 已儲存：{combined_path}")
 
-                # 重排頁序（報關→第1，小票→第2）
-                try:
-                    import fitz as _fitz
-                    _doc = _fitz.open(combined_path)
-                    if len(_doc) >= 3:
-                        _new = _fitz.open()
-                        _new.insert_pdf(_doc, from_page=2, to_page=2)
-                        _new.insert_pdf(_doc, from_page=0, to_page=0)
-                        _doc.close()
-                        _new.save(combined_path, garbage=4, deflate=True)
-                        _new.close()
-                except Exception:
-                    pass
 
             except Exception as e:
                 print(f"  ⚠️  PDF 下載失敗：{e}")
@@ -1080,7 +1067,7 @@ with sync_playwright() as pw:
         orig_dir = c["save_dir"]
         orig_combined = next(
             (os.path.join(orig_dir, f) for f in os.listdir(orig_dir)
-             if "明細" in f and f.endswith(".pdf")),
+             if "明細+清關" in f and f.endswith(".pdf")),
             c.get("combined_pdf", "")
         ) if os.path.exists(orig_dir) else c.get("combined_pdf", "")
         c["combined_pdf_orig"] = orig_combined
