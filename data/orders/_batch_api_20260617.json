@@ -5,13 +5,13 @@
   "failRecordList": [],
   "successRecordList": [
     {
-      "id": 2097525,
-      "taskId": 167044,
+      "id": 2097526,
+      "taskId": 167045,
       "number": 3,
-      "expressNo": "ORD-948793",
-      "createTime": "2026-06-17 23:43:05",
-      "updateTime": "2026-06-17 23:43:05",
-      "printJson": "{\"expressNo\":\"ORD-948793\",\"subWaybillNoList\":[{\"waybillNo\":\"SF5197608654494\",\"waybillType\":1}],\"masterWaybillNo\":\"SF5197608654494\"}",
+      "expressNo": "ORD-285697",
+      "createTime": "2026-06-17 23:48:42",
+      "updateTime": "2026-06-17 23:48:42",
+      "printJson": "{\"expressNo\":\"ORD-285697\",\"subWaybillNoList\":[{\"waybillNo\":\"SF0225939399694\",\"waybillType\":1}],\"masterWaybillNo\":\"SF0225939399694\"}",
       "isCancel": null
     }
   ]

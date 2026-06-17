@@ -925,8 +925,17 @@ with sync_playwright() as pw:
         name    = c["order"]["name"]
         new_dir = os.path.join(ORDERS_DIR, f"{name}_{today}_{c['pos_no']}_{waybill}")
         c["save_dir_final"]   = new_dir
-        c["combined_pdf"]     = os.path.join(new_dir, f"{name}_{today}_{c['pos_no']}_{waybill}_明細+清關.pdf")
-        c["waybill_pdf"]      = os.path.join(new_dir, f"{name}_{today}_{c['pos_no']}_{waybill}_運單.pdf")
+        # combined_pdf_orig = 文件現在仍在舊路徑（Stage 4 報關用）
+        # combined_pdf      = 最終路徑（Stage 5 記錄用，文件移動後才存在）
+        orig_dir = c["save_dir"]
+        orig_combined = next(
+            (os.path.join(orig_dir, f) for f in os.listdir(orig_dir)
+             if "明細" in f and f.endswith(".pdf")),
+            c.get("combined_pdf", "")
+        ) if os.path.exists(orig_dir) else c.get("combined_pdf", "")
+        c["combined_pdf_orig"] = orig_combined
+        c["combined_pdf"]      = os.path.join(new_dir, f"{name}_{today}_{c['pos_no']}_{waybill}_明細+清關.pdf")
+        c["waybill_pdf"]       = os.path.join(new_dir, f"{name}_{today}_{c['pos_no']}_{waybill}_運單.pdf")
 
     # ══════════════════════════════════════════════════════════════════════════
     # 階段四：報關上傳（hk.sf-express.com）
@@ -954,7 +963,8 @@ with sync_playwright() as pw:
             continue
         name        = c["order"]["name"]
         waybill     = c["waybill"]
-        combined    = c.get("combined_pdf", "")
+        # 用原始路徑（文件還未移動）
+        combined    = c.get("combined_pdf_orig") or c.get("combined_pdf", "")
 
         front, back = _cl_mod.find_id_cards(name)
         if not front or not os.path.exists(str(front)):
@@ -964,7 +974,7 @@ with sync_playwright() as pw:
             print(f"  ⚠️  {name} 找不到身份証背面，跳過報關")
             continue
         if not combined or not os.path.exists(combined):
-            print(f"  ⚠️  {name} 找不到清關PDF，跳過報關")
+            print(f"  ⚠️  {name} 找不到清關PDF（路徑：{combined}），跳過報關")
             continue
 
         print(f"\n▶ 報關 {name}  {waybill}")
