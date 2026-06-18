@@ -370,14 +370,21 @@ def upload_batch_and_get_waybills(page, excel_path: str, orders_with_ids: list) 
 
     def _is_logged_out(pg):
         u = pg.url.lower()
-        if "login" in u or "/sign" in u:
+        if "login" in u or "/sign" in u or "buac.sf-express.com" in u:
             return True
+        # session 過期 → 重定向到根目錄，不含任何功能路徑
+        camp_root = "camp.sf-express.com" in u and not any(
+            p in u for p in ("batchorder", "monthcard", "scanprint", "portal")
+        )
         try:
             txt = pg.inner_text("body")[:800]
+            if camp_root and "月結" not in txt:
+                return True
             if ("登入" in txt or "login" in txt.lower()) and "月結" not in txt:
                 return True
         except Exception:
-            pass
+            if camp_root:
+                return True
         return False
 
     def _js_click_confirm(pg):
@@ -393,8 +400,7 @@ def upload_batch_and_get_waybills(page, excel_path: str, orders_with_ids: list) 
 
     def _check_and_relogin(pg):
         """若被重定向到登入頁，提示用戶登入後繼續。"""
-        u = pg.url.lower()
-        if "login" in u or "buac.sf-express.com" in u or "/sign" in u:
+        if _is_logged_out(pg):
             print("\n⚠️  camp.sf-express.com session 已過期，請在瀏覽器視窗登入帳號")
             print("   登入完成後，在這裡按 Enter 繼續...")
             input("   ↩  按 Enter 繼續...")
@@ -599,6 +605,302 @@ def download_waybill_pdf(page, waybill: str, dest_path: str) -> bool:
     return False
 
 
+# ─── 從批量訂單成功頁打印單張運單 PDF ──────────────────────────────────────────
+
+def _batch_print_batchorder_page(page, completed: list) -> bool:
+    """
+    在 camp batchorder 成功頁：
+    1. 點 header checkbox 全選
+    2. 點「批量打印」→ 等「打印設置」對話框
+    3. 注入 JS 攔截 window.open(blob) + 屏蔽 window.print
+    4. 點「列印面單」
+    5. 從攔截到的 blob URL fetch PDF，按客人順序分別存檔
+    """
+    try:
+        # ── Step 1：全選 ──
+        header_cb = page.locator("thead .el-checkbox").first
+        header_cb.wait_for(state="visible", timeout=10000)
+        header_cb.click()
+        time.sleep(1)
+        print("  ✅ 已全選所有訂單")
+
+        # ── Step 2：批量打印 ──
+        batch_btn = page.locator("button:has-text('批量打印')").first
+        batch_btn.wait_for(state="visible", timeout=8000)
+        batch_btn.click()
+        time.sleep(2)
+
+        # ── Step 3：等「打印設置」對話框 ──
+        confirm_btn = page.locator("button:has-text('列印面單')").first
+        confirm_btn.wait_for(state="visible", timeout=15000)
+
+        # ── Step 4：注入 JS，攔截 window.open(blob) 及屏蔽 window.print ──
+        page.evaluate("""
+            () => {
+                window._sf_blobs = [];
+                const _origOpen = window.open.bind(window);
+                window.open = function(url, ...args) {
+                    if (url && url.startsWith('blob:')) {
+                        window._sf_blobs.push(url);
+                        return null;          // 唔開新分頁
+                    }
+                    return _origOpen(url, ...args);
+                };
+                window.print = function() {};  // 屏蔽原生打印對話框
+            }
+        """)
+
+        # 同時監聽 response，捕捉 PDF content-type 回應
+        captured_resp: list = []
+        def _on_resp(resp):
+            try:
+                ct = resp.headers.get("content-type", "")
+                if "pdf" in ct.lower():
+                    body = resp.body()
+                    if len(body) > 1000:
+                        captured_resp.append(body)
+            except Exception:
+                pass
+        page.on("response", _on_resp)
+
+        # ── Step 5：點「列印面單」──
+        print("  點擊「列印面單」...")
+        confirm_btn.click()
+        time.sleep(8)   # 等 SF 系統生成 PDF
+
+        page.remove_listener("response", _on_resp)
+
+        # ── Step 6：取得 blob URLs ──
+        blob_urls = page.evaluate("() => window._sf_blobs || []")
+        print(f"  捕捉到 {len(blob_urls)} 個 blob URL，{len(captured_resp)} 個 response PDF")
+
+        # ── Step 7：按客人順序存 PDF ──
+        saved = 0
+        n = len(completed)
+
+        # 優先用 blob URLs
+        sources = blob_urls if blob_urls else ([None] * len(captured_resp))
+
+        for i, c in enumerate(completed):
+            waybill = c.get("waybill", "")
+            name    = c["order"]["name"]
+            pos_no  = c["pos_no"]
+            fn      = f"{name}_{today}_{pos_no}{'_'+waybill if waybill else ''}_運單.pdf"
+            dest    = os.path.join(c["save_dir"], fn)
+            c["waybill_pdf"] = dest
+
+            pdf_bytes = b""
+
+            if i < len(blob_urls):
+                # fetch blob URL
+                safe_url = blob_urls[i].replace("'", "")
+                try:
+                    pdf_b64 = page.evaluate(f"""
+                        async () => {{
+                            const r  = await fetch('{safe_url}');
+                            const ab = await r.arrayBuffer();
+                            const u8 = new Uint8Array(ab);
+                            const chunks = [];
+                            for (let j = 0; j < u8.length; j += 8192) {{
+                                chunks.push(String.fromCharCode(
+                                    ...u8.subarray(j, Math.min(j + 8192, u8.length))
+                                ));
+                            }}
+                            return btoa(chunks.join(''));
+                        }}
+                    """)
+                    pdf_bytes = base64.b64decode(pdf_b64)
+                except Exception as e:
+                    print(f"  ⚠️  {name} fetch blob 失敗：{e}")
+
+            elif i < len(captured_resp):
+                # 用 response 攔截
+                pdf_bytes = captured_resp[i]
+
+            if len(pdf_bytes) > 1000:
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with open(dest, "wb") as f:
+                    f.write(pdf_bytes)
+                print(f"  ✅ {name} 運單已儲存：{os.path.basename(dest)}")
+                saved += 1
+            else:
+                print(f"  ❌ {name} 無法取得 PDF，請手動儲存")
+
+        # 關掉打印設置對話框（如果還開著）
+        try: page.keyboard.press("Escape")
+        except Exception: pass
+
+        return saved > 0
+
+    except Exception as e:
+        print(f"  ❌ 批量打印失敗：{e}")
+        try: page.keyboard.press("Escape")
+        except Exception: pass
+        return False
+
+
+def _print_waybill_on_batchorder_page(page, order_id: str, dest_path: str) -> bool:
+    """
+    在 camp batchorder 成功頁，找到對應訂單行的「打印」按鈕，
+    點擊 → 等「打印設置」對話框 → 點「列印面單」→ 攔截 blob popup PDF 存檔。
+    成功返回 True。支援 3 次重試。
+    """
+    retry_waits = [15, 40]
+
+    def _fetch_blob_popup(pg) -> bytes:
+        """等 popup 出現，fetch blob URL，返回 PDF bytes；失敗拋異常。"""
+        with pg.expect_popup(timeout=25000) as popup_info:
+            pass  # popup 已由外層觸發，這裡只等
+        popup_page = popup_info.value
+        blob_url = popup_page.url
+        time.sleep(2)
+        if not blob_url.startswith("blob:"):
+            try: popup_page.close()
+            except Exception: pass
+            raise ValueError(f"非 blob URL: {blob_url[:80]}")
+        safe_url = blob_url.replace("'", "")
+        pdf_b64 = pg.evaluate(f"""
+            async () => {{
+                const r  = await fetch('{safe_url}');
+                const ab = await r.arrayBuffer();
+                const u8 = new Uint8Array(ab);
+                const chunks = [];
+                for (let i = 0; i < u8.length; i += 8192) {{
+                    chunks.push(String.fromCharCode(
+                        ...u8.subarray(i, Math.min(i + 8192, u8.length))
+                    ));
+                }}
+                return btoa(chunks.join(''));
+            }}
+        """)
+        try: popup_page.close()
+        except Exception: pass
+        return base64.b64decode(pdf_b64)
+
+    for attempt in range(3):
+        try:
+            # Step 1：找該訂單行的「打印」按鈕並點擊
+            row = page.locator(f"tr:has-text('{order_id}')").first
+            print_btn = row.locator("button:has-text('打印')").first
+            print_btn.wait_for(state="visible", timeout=10000)
+            print_btn.click()
+            time.sleep(2)
+
+            # Step 2：等「打印設置」對話框出現，點「列印面單」
+            #         若對話框未出現（直接 popup），跳到 Step 3
+            try:
+                confirm_btn = page.locator("button:has-text('列印面單')").first
+                confirm_btn.wait_for(state="visible", timeout=8000)
+                print("  點擊「列印面單」...")
+
+                # ── 策略 1：列印面單 → popup blob ──
+                captured_pdf: list = []
+
+                def _on_resp(resp):
+                    try:
+                        ct = resp.headers.get("content-type", "")
+                        if "pdf" in ct.lower():
+                            body = resp.body()
+                            if len(body) > 1000:
+                                captured_pdf.append(body)
+                    except Exception:
+                        pass
+
+                page.on("response", _on_resp)
+                try:
+                    with page.expect_popup(timeout=20000) as popup_info:
+                        confirm_btn.click()
+                    popup_page = popup_info.value
+                    blob_url = popup_page.url
+                    time.sleep(2)
+                    if blob_url.startswith("blob:"):
+                        safe_url = blob_url.replace("'", "")
+                        pdf_b64 = page.evaluate(f"""
+                            async () => {{
+                                const r  = await fetch('{safe_url}');
+                                const ab = await r.arrayBuffer();
+                                const u8 = new Uint8Array(ab);
+                                const chunks = [];
+                                for (let i = 0; i < u8.length; i += 8192) {{
+                                    chunks.push(String.fromCharCode(
+                                        ...u8.subarray(i, Math.min(i + 8192, u8.length))
+                                    ));
+                                }}
+                                return btoa(chunks.join(''));
+                            }}
+                        """)
+                        try: popup_page.close()
+                        except Exception: pass
+                        pdf_bytes = base64.b64decode(pdf_b64)
+                        if len(pdf_bytes) > 1000:
+                            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                            with open(dest_path, "wb") as f:
+                                f.write(pdf_bytes)
+                            page.remove_listener("response", _on_resp)
+                            return True
+                        print(f"  ⚠️  blob PDF 太小 ({len(pdf_bytes)} bytes)")
+                        try: popup_page.close()
+                        except Exception: pass
+                    else:
+                        print(f"  ⚠️  非 blob URL：{blob_url[:80]}")
+                        try: popup_page.close()
+                        except Exception: pass
+                except Exception:
+                    # 無 popup → 用 response 攔截
+                    time.sleep(8)
+                finally:
+                    try: page.remove_listener("response", _on_resp)
+                    except Exception: pass
+
+                # ── 策略 2：response 攔截（無 popup）──
+                if captured_pdf:
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                    with open(dest_path, "wb") as f:
+                        f.write(captured_pdf[0])
+                    return True
+
+            except Exception as dlg_err:
+                # 沒有「打印設置」對話框，直接嘗試等 popup（舊流程）
+                print(f"  ⚠️  無打印設置對話框（{dlg_err}），嘗試直接 popup...")
+                captured_pdf2: list = []
+
+                def _on_resp2(resp):
+                    try:
+                        ct = resp.headers.get("content-type", "")
+                        if "pdf" in ct.lower():
+                            body = resp.body()
+                            if len(body) > 1000:
+                                captured_pdf2.append(body)
+                    except Exception:
+                        pass
+
+                page.on("response", _on_resp2)
+                try:
+                    time.sleep(8)
+                finally:
+                    try: page.remove_listener("response", _on_resp2)
+                    except Exception: pass
+                    try: page.keyboard.press("Escape"); time.sleep(1)
+                    except Exception: pass
+
+                if captured_pdf2:
+                    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                    with open(dest_path, "wb") as f:
+                        f.write(captured_pdf2[0])
+                    return True
+
+        except Exception as e:
+            print(f"  ⚠️  嘗試 {attempt+1}/3 失敗：{e}")
+            try: page.keyboard.press("Escape"); time.sleep(1)
+            except Exception: pass
+
+        wait = retry_waits[attempt] if attempt < len(retry_waits) else 10
+        print(f"  等 {wait}s 後重試...")
+        time.sleep(wait)
+
+    return False
+
+
 # ─── 通用 dismiss 彈窗 ─────────────────────────────────────────────────────────
 
 def _dismiss(page, max_tries=5):
@@ -744,12 +1046,16 @@ with sync_playwright() as pw:
                     await Promise.all(ks.map(k => caches.delete(k)));
                 }
             }""")
-            pos_page.reload(wait_until="domcontentloaded", timeout=20000)
-            time.sleep(5)
-
-            # 登入後台
+            pos_page.reload(wait_until="domcontentloaded", timeout=30000)
+            # 等「載入中...」消失，再等「后台管理」出現（最多 90 秒）
             try:
-                pos_page.wait_for_selector("button:has-text('后台管理')", timeout=20000)
+                pos_page.wait_for_selector(
+                    "text=載入中", state="hidden", timeout=60000
+                )
+            except Exception:
+                pass
+            try:
+                pos_page.wait_for_selector("button:has-text('后台管理')", timeout=60000)
             except Exception:
                 pos_page.screenshot(path=os.path.join(ORDERS_DIR, f"_pos_debug_{today}.png"))
                 raise RuntimeError(f"POS 頁面找不到「后台管理」按鈕，截圖：_pos_debug_{today}.png")
@@ -909,177 +1215,163 @@ with sync_playwright() as pw:
         c["waybill"] = waybill_map.get(c["pos_no"], "")
 
     # ══════════════════════════════════════════════════════════════════════════
-    # 階段三：下載運單 PDF
+    # 階段三：查件服務(待攬收)頁 → 輸入運單號 → 全選 → 批量打印 → blob PDF
     # ══════════════════════════════════════════════════════════════════════════
     print("\n" + "="*60)
-    print("  階段三：下載運單 PDF")
+    print("  階段三：查件服務批量打印運單 PDF")
     print("="*60)
 
-    def _ensure_download_mode(pg):
-        """確保列印方式選中「下載到本地」，並關閉 C-LODOP 彈窗。"""
-        # 關閉 C-LODOP 插件提示（點「取消」）
-        try:
-            cancel = pg.locator("button", has_text="取消")
-            if cancel.first.is_visible(timeout=2000):
-                cancel.first.click()
-                time.sleep(1)
-        except Exception:
-            pass
-        # 確認下拉框是否已選「下載到本地」
-        try:
-            sel_text = pg.locator(".el-select").first.inner_text(timeout=3000)
-        except Exception:
-            sel_text = ""
-        if "下載到本地" not in sel_text:
-            try:
-                pg.locator(".el-select").first.click()
-                time.sleep(1)
-                pg.locator("li.el-select-dropdown__item", has_text="下載到本地").click(timeout=5000)
-                time.sleep(1)
-            except Exception:
-                pass  # 下拉框操作失敗，繼續嘗試
+    COLLECTED_URL = ("https://camp.sf-express.com/Collected"
+                     "?tabName=pending_collection&isCollect=false")
 
-    print("  選擇「下載到本地」...")
-    sf_page.goto(CAMP_PRINT_URL, wait_until="domcontentloaded")
-    time.sleep(4)
-    _dismiss(sf_page)
-    # 偵測 ScanPrint 是否需要重新登入
-    try:
-        page_txt = sf_page.inner_text("body")[:500]
-        if "登入" in page_txt and "掃描" not in page_txt:
-            print("\n⚠️  ScanPrint 需要重新登入，請在瀏覽器登入後按 Enter...")
-            input("   ↩  按 Enter 繼續...")
-            sf_page.goto(CAMP_PRINT_URL, wait_until="domcontentloaded")
-            time.sleep(4)
-            _dismiss(sf_page)
-    except Exception:
-        pass
-    _ensure_download_mode(sf_page)
-    _dismiss(sf_page)
+    def _fetch_blob_pdf(pg, blob_url):
+        safe_url = blob_url.replace("'", "").replace("\\", "")
+        b64 = pg.evaluate(f"""
+            async () => {{
+                const r = await fetch('{safe_url}');
+                const ab = await r.arrayBuffer();
+                const u8 = new Uint8Array(ab);
+                const chunks = [];
+                for (let i = 0; i < u8.length; i += 8192) {{
+                    chunks.push(String.fromCharCode(
+                        ...u8.subarray(i, Math.min(i + 8192, u8.length))
+                    ));
+                }}
+                return btoa(chunks.join(''));
+            }}
+        """)
+        return base64.b64decode(b64)
 
-    scan_input = sf_page.locator("input[placeholder='此處為掃描結果']")
-
+    # 按客人名分組（同一客人的多張運單一次過打印）
+    from collections import defaultdict as _dd
+    cust_groups = _dd(list)
     for c in completed:
-        waybill = c.get("waybill", "")
-        if not waybill:
-            print(f"  ⚠️  {c['order']['name']} 無運單號，跳過下載")
-            continue
+        if c.get("waybill"):
+            cust_groups[c["order"]["name"]].append(c)
+        else:
+            print(f"  ⚠️  {c['order']['name']} 無運單號，跳過")
 
-        dest_path = os.path.join(c["save_dir"],
-                                 f"{c['order']['name']}_{today}_{c['pos_no']}_{waybill}_運單.pdf")
-        c["waybill_pdf"] = dest_path
-        print(f"  下載 {waybill} ({c['order']['name']})...")
-
-        _dismiss(sf_page)
-        scan_input.click()
-        scan_input.fill(waybill)
-        scan_input.press("Enter")  # 觸發運單查詢
-        time.sleep(5)  # 等 ScanPrint 系統識別新運單
+    for cust_name, cust_list in cust_groups.items():
+        waybills    = [c["waybill"] for c in cust_list]
+        waybill_str = ",".join(waybills)
+        pos_nos   = "_".join(c["pos_no"] for c in cust_list)
+        dest_path = os.path.join(
+            cust_list[0]["save_dir"],
+            f"{cust_name}_{today}_{pos_nos}_運單.pdf"
+        )
+        print(f"\n  客人: {cust_name}  運單: {waybill_str}")
 
         pdf_saved = False
-        # SF「下載到本地」會把 PDF 開在新分頁（blob: URL），需用 expect_popup 捕捉
-        scan_retry_waits = [20, 45, 90]
         for attempt in range(3):
             try:
-                _ensure_download_mode(sf_page)
-                try:
-                    with sf_page.expect_popup(timeout=25000) as popup_info:
-                        sf_page.locator("button", has_text="打印").click()
-                        time.sleep(2)
-                        _ensure_download_mode(sf_page)
+                sf_page.goto(COLLECTED_URL, wait_until="domcontentloaded")
+                time.sleep(5)
+                _dismiss(sf_page)
 
-                    popup_page = popup_info.value
-                    blob_url = popup_page.url
+                # 逐個運單號 fill + Enter → 轉成 chip
+                textarea = sf_page.locator(
+                    "textarea.waybill-textarea, textarea[placeholder*='手動輸入']"
+                )
+                textarea.first.wait_for(state="visible", timeout=12000)
+                for w in waybills:
+                    textarea.first.click()
+                    textarea.first.fill(w)
+                    time.sleep(0.5)
+                    textarea.first.press("Enter")
+                    time.sleep(1)
+                time.sleep(2)
+
+                # 點搜尋 icon（img 在 func-icon-container 入面）
+                for sel in [
+                    "div.func-icon-container img",
+                    ".func-icon-container img",
+                    "[class*='func-icon-container'] img",
+                    ".el-icon-search",
+                ]:
+                    try:
+                        sf_page.locator(sel).first.click(timeout=2000)
+                        break
+                    except Exception:
+                        pass
+                time.sleep(6)
+
+                # 等表格篩選後有行出現
+                sf_page.locator(".el-table__body tr").first.wait_for(
+                    state="visible", timeout=20000
+                )
+                time.sleep(2)
+
+                # 全選：點 fixed-header-wrapper 入面的 checkbox
+                hdr_cb = sf_page.locator(
+                    ".el-table__fixed-header-wrapper .el-checkbox__inner"
+                ).first
+                hdr_cb.wait_for(state="visible", timeout=8000)
+                hdr_cb.click()
+                time.sleep(1)
+                # 驗證至少有一行被選中
+                row_checked = sf_page.locator(
+                    ".el-table__body .el-checkbox.is-checked"
+                ).count()
+                if row_checked == 0:
+                    raise RuntimeError("全選後仍無行被選中，可能搜尋結果為空")
+
+                # 點批量打印
+                sf_page.locator(
+                    "span:has-text('批量打印'), "
+                    "div.tag.btn-option span:has-text('批量打印'), "
+                    "button:has-text('批量打印')"
+                ).first.click()
+                time.sleep(3)
+
+                # 等打印設置 dialog（PrintContent）
+                sf_page.locator(".PrintContent, .sf-modal.PrintContent").first.wait_for(
+                    state="visible", timeout=20000
+                )
+                time.sleep(2)
+
+                # 攔截 popup（列印面單）
+                with sf_page.expect_popup(timeout=30000) as popup_info:
+                    sf_page.locator(
+                        ".print_btn_block span.print,"
+                        ".print_btn_block .print,"
+                        ".print_btn_block button"
+                    ).first.click()
                     time.sleep(2)
 
-                    if blob_url.startswith("blob:"):
-                        # 用原 SF 頁面（同 origin）fetch blob 並轉 base64
-                        safe_url = blob_url.replace("'", "")
-                        pdf_b64 = sf_page.evaluate(f"""
-                            async () => {{
-                                const r = await fetch('{safe_url}');
-                                const ab = await r.arrayBuffer();
-                                const u8 = new Uint8Array(ab);
-                                const chunks = [];
-                                for (let i = 0; i < u8.length; i += 8192) {{
-                                    chunks.push(String.fromCharCode(
-                                        ...u8.subarray(i, Math.min(i + 8192, u8.length))
-                                    ));
-                                }}
-                                return btoa(chunks.join(''));
-                            }}
-                        """)
-                        try:
-                            popup_page.close()
-                        except Exception:
-                            pass
-                        import base64 as _b64
-                        pdf_bytes = _b64.b64decode(pdf_b64)
-                        if len(pdf_bytes) > 1000:
-                            with open(dest_path, "wb") as f:
-                                f.write(pdf_bytes)
+                popup_page = popup_info.value
+                blob_url   = popup_page.url
+                time.sleep(3)
+
+                if blob_url.startswith("blob:"):
+                    pdf_bytes = _fetch_blob_pdf(sf_page, blob_url)
+                    try: popup_page.close()
+                    except Exception: pass
+
+                    if len(pdf_bytes) > 1000:
+                        os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                        with open(dest_path, "wb") as f:
+                            f.write(pdf_bytes)
+                        for c in cust_list:
                             c["waybill_pdf"] = dest_path
-                            print(f"  ✅ 已儲存：{dest_path}")
-                            pdf_saved = True
-                            break
-                        else:
-                            print(f"  ⚠️  PDF 太小，重試（{attempt+1}/3）...")
-                            time.sleep(5)
+                        print(f"  ✅ 已儲存：{os.path.basename(dest_path)}")
+                        pdf_saved = True
+                        break
                     else:
-                        print(f"  ⚠️  非預期 popup URL：{blob_url[:80]}")
-                        try:
-                            popup_page.close()
-                        except Exception:
-                            pass
-                        time.sleep(5)
+                        print(f"  ⚠️  PDF 太小，重試（{attempt+1}/3）...")
+                        try: popup_page.close()
+                        except Exception: pass
+                else:
+                    print(f"  ⚠️  非預期 popup URL：{blob_url[:80]}")
+                    try: popup_page.close()
+                    except Exception: pass
 
-                except Exception as e:
-                    # 偵測「打印失敗」—— SF 後台還沒同步，需等待後刷新重試
-                    page_fail = False
-                    try:
-                        body_txt = sf_page.inner_text("body", timeout=3000)
-                        page_fail = "打印失敗" in body_txt
-                    except Exception:
-                        pass
-
-                    if page_fail and attempt < 3:
-                        wait_sec = scan_retry_waits[attempt]
-                        print(f"  ⚠️  SF ScanPrint「打印失敗」（運單剛建立，尚未同步），"
-                              f"等 {wait_sec}s 後刷新重試（{attempt+1}/3）...")
-                        time.sleep(wait_sec)
-                        sf_page.goto(CAMP_PRINT_URL, wait_until="domcontentloaded")
-                        time.sleep(5)
-                        _dismiss(sf_page)
-                        _ensure_download_mode(sf_page)
-                        scan_input = sf_page.locator("input[placeholder='此處為掃描結果']")
-                        scan_input.click()
-                        scan_input.fill(waybill)
-                        scan_input.press("Enter")
-                        time.sleep(8)
-                        continue
-
-                    print(f"  ⚠️  下載失敗（{attempt+1}/3）：{e}")
-                    ss = os.path.join(ORDERS_DIR, f"_scanprint_fail_{today}_{attempt+1}.png")
-                    try:
-                        sf_page.screenshot(path=ss)
-                        print(f"     截圖：{ss}")
-                    except Exception:
-                        pass
-                    time.sleep(5)
-                    try:
-                        scan_input.click()
-                        scan_input.fill(waybill)
-                        scan_input.press("Enter")
-                        time.sleep(8)
-                    except Exception:
-                        pass
             except Exception as e:
-                print(f"  ⚠️  意外錯誤（{attempt+1}/3）：{e}")
-                time.sleep(5)
-        if not pdf_saved:
-            print(f"  ❌ {waybill} 運單 PDF 無法下載，繼續下一張")
+                print(f"  ⚠️  打印失敗（{attempt+1}/3）：{e}")
+                time.sleep(8)
 
-        time.sleep(2)
+        if not pdf_saved:
+            print(f"  ❌ {cust_name} 運單 PDF 無法下載")
+        time.sleep(3)
 
     sf_page.close()
 

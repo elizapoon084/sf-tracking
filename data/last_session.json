@@ -1,8 +1,15 @@
 [
   {
-    "customer": "谢蔼荣",
-    "waybill": "SF5197604173236",
-    "pdf_path": "C:\\Users\\user\\Desktop\\順丰E順递\\data\\orders\\谢蔼荣_20260618_ORD-928527_SF5197604173236\\谢蔼荣_20260618_ORD-928527_SF5197604173236_運單.pdf",
+    "customer": "张粲明",
+    "waybill": "SF0227169487922",
+    "pdf_path": "C:\\Users\\user\\Desktop\\順丰E順递\\data\\orders\\张粲明_20260618_ORD-289597_SF0227169487922\\张粲明_20260618_ORD-289597_SF0227169487922_運單.pdf",
+    "id_uploaded": true,
+    "customs_uploaded": true
+  },
+  {
+    "customer": "马佩云",
+    "waybill": "SF5134850149793",
+    "pdf_path": "C:\\Users\\user\\Desktop\\順丰E順递\\data\\orders\\马佩云_20260618_ORD-319931_SF5134850149793\\马佩云_20260618_ORD-319931_SF5134850149793_運單.pdf",
     "id_uploaded": true,
     "customs_uploaded": true
   }
